@@ -1,3 +1,4 @@
+import os
 from typing import Iterator, Optional
 from urllib.request import Request, urlopen
 from fastapi import FastAPI, HTTPException, Query, Request as FastAPIRequest, Response
@@ -28,7 +29,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ytmusic_service = YTMusicService()
+ytmusic_service = YTMusicService(
+    base_proxy_url=os.environ.get("OMNIX_PUBLIC_URL")
+    or os.environ.get("RENDER_EXTERNAL_URL", "http://127.0.0.1:8001")
+)
 
 
 @app.get("/health")
