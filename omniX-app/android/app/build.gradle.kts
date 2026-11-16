@@ -43,13 +43,6 @@ android {
 }
 
 
-// Lint release crash di CI (NoSuchMethodError List.removeLast di CommentDetector);
-// matikan task lint vital saat build release.
-tasks.named("lintVitalAnalyzeRelease") {
-    enabled = false
-}
-
-
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
