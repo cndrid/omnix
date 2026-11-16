@@ -4,15 +4,18 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+
 android {
     namespace = "com.example.omnix_app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
@@ -29,6 +32,7 @@ android {
         versionName = flutter.versionName
     }
 
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
@@ -36,18 +40,22 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
-    lint {
-        // Lint release crash di CI (NoSuchMethodError List.removeLast() di CommentDetector);
-        // matikan lint saat build release, APK tidak butuh hasil lint.
-        checkRelease = false
-    }
 }
+
+
+// Lint release crash di CI (NoSuchMethodError List.removeLast di CommentDetector);
+// matikan task lint vital saat build release.
+tasks.named("lintVitalAnalyzeRelease") {
+    enabled = false
+}
+
 
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
+
 
 flutter {
     source = "../.."
