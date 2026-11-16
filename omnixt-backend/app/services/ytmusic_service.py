@@ -3,6 +3,97 @@ from urllib.parse import quote
 from ytmusicapi import YTMusic
 import yt_dlp
 
+# PATCH LOKAL (hosting di Muse, 16 Nov 2026):
+# Egress proxy mesin ini menolak User-Agent Firefox. ytmusicapi memakai UA
+# "Firefox/88.0" yang hardcoded di initialize_headers(), sehingga semua
+# request ke music.youtube.com ditutup proxy (ProxyError RemoteDisconnected).
+# UA Chrome modern lolos proxy. Patch ini hanya mengganti UA, tanpa mengubah
+# perilaku lain. Jangan hapus selama backend jalan di mesin ini.
+import ytmusicapi.helpers as _ytm_helpers
+import ytmusicapi.ytmusic as _ytm_module
+
+_CHROME_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+_orig_initialize_headers = _ytm_helpers.initialize_headers
+
+
+def _initialize_headers_chrome_ua():
+    headers = _orig_initialize_headers()
+    headers["user-agent"] = _CHROME_UA
+    return headers
+
+
+_ytm_helpers.initialize_headers = _initialize_headers_chrome_ua
+_ytm_module.initialize_headers = _initialize_headers_chrome_ua
+
+# Fallback player client YouTube untuk yt-dlp (17 Nov 2026):
+# Client 'web' paling sering kena tantangan bot YouTube dari IP datacenter
+# (gejala di Fly.io: detail lagu + stream kosong), sedangkan client mobile
+# memakai endpoint player yang berbeda dan sering lolos. Dicoba satu per
+# satu: 'android' -> 'ios' -> 'web'. Bila ketiganya gagal, satu percobaan
+# terakhir memakai pemilihan client bawaan yt-dlp (tanpa extractor_args) —
+# yt-dlp sendiri sudah mencoba beberapa client secara internal.
+_YT_PLAYER_CLIENTS = ("android", "ios", "web")
+
+
+def _info_has_usable_formats(info: Optional[dict[str, Any]], require_audio_only: bool) -> bool:
+    """True bila info berisi format stream media yang bisa dipakai.
+
+    Format storyboard (vcodec dan acodec sama-sama 'none') diabaikan.
+    Untuk audio, harus ada format audio-only (vcodec 'none', acodec terisi)
+    — client 'android' kadang hanya mengembalikan itag 18 (muxed) tanpa
+    format audio-only, jadi hasil seperti itu tidak cukup untuk audio.
+    """
+    if not info:
+        return False
+    for fmt in info.get("formats") or []:
+        if not fmt.get("url"):
+            continue
+        vcodec = fmt.get("vcodec", "none")
+        acodec = fmt.get("acodec", "none")
+        if vcodec == "none" and acodec == "none":
+            continue
+        if require_audio_only:
+            if vcodec == "none" and acodec != "none":
+                return True
+        else:
+            return True
+    return False
+
+
+def _extract_info_with_player_clients(url: str, require_audio_only: bool = False) -> dict[str, Any]:
+    """Ekstrak info video dengan yt-dlp, mencoba beberapa player client.
+
+    Mengembalikan dict info pertama yang punya format usable (lihat
+    _info_has_usable_formats), atau {} bila semua percobaan gagal.
+    Setiap percobaan tetap quiet/skip_download/noplaylist. Verifikasi TLS
+    tetap aktif, tapi memakai sertifikat sistem (compat_opts 'no-certifi')
+    supaya CA proxy egress mesin ini dipercaya — tanpa itu semua percobaan
+    gagal CERTIFICATE_VERIFY_FAILED karena yt-dlp memakai bundle certifi.
+    """
+    attempts: list[Optional[str]] = list(_YT_PLAYER_CLIENTS) + [None]
+    for client in attempts:
+        ydl_opts: dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "noplaylist": True,
+            "compat_opts": {"no-certifi"},
+        }
+        if client is not None:
+            ydl_opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception:
+            continue
+        if _info_has_usable_formats(info, require_audio_only):
+            return info or {}
+    return {}
+
 from app.models import (
     AiDjResponse,
     AlbumRef,
@@ -152,17 +243,9 @@ class YTMusicService:
         if target_video_id in self._video_url_cache:
             return self._video_url_cache[target_video_id]
 
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "noplaylist": True,
-        }
         url = f"https://www.youtube.com/watch?v={target_video_id}"
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-        except Exception:
+        info = _extract_info_with_player_clients(url)
+        if not info:
             return None
 
         formats = info.get("formats") or []
@@ -212,18 +295,8 @@ class YTMusicService:
         return None
 
     def _extract_streams(self, video_id: str, title: str = "", artist: str = "") -> dict[str, Any]:
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "noplaylist": True,
-        }
         url = f"https://music.youtube.com/watch?v={video_id}"
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-        except Exception:
-            info = {}
+        info = _extract_info_with_player_clients(url, require_audio_only=True)
 
         formats = info.get("formats") or []
         best_audio: Optional[dict[str, Any]] = None
