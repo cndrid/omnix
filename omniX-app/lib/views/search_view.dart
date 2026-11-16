@@ -1,0 +1,524 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/track_model.dart';
+import '../providers/app_providers.dart';
+import '../theme/omnix_theme.dart';
+import 'widgets/liquid_glass_box.dart';
+import 'widgets/track_tile.dart';
+
+class SearchView extends ConsumerStatefulWidget {
+  final double bottomSafePadding;
+
+  const SearchView({
+    super.key,
+    required this.bottomSafePadding,
+  });
+
+  @override
+  ConsumerState<SearchView> createState() => _SearchViewState();
+}
+
+class _SearchViewState extends ConsumerState<SearchView> {
+  late final TextEditingController _textController;
+  Timer? _debounce;
+
+  static const List<(String, String)> _filters = [
+    ('songs', 'Lagu'),
+    ('videos', 'Video Musik'),
+    ('albums', 'Album'),
+    ('artists', 'Artis'),
+    ('playlists', 'Playlist'),
+    ('podcasts', 'Podcast'),
+    ('audiobooks', 'Audiobook Gratis'),
+    ('lyrics', 'Lirik'),
+    ('spatial', 'Spasial 3D'),
+    ('all', 'Semua'),
+  ];
+
+  static const List<(String, String, Color)> _genreCards = [
+    ('Pop Indonesia', 'Lagu Pop Indonesia Terbaru', Color(0xFF6340F5)),
+    ('Lo-Fi & Fokus Kerja', 'lofi chill beats focus', Color(0xFF1F6E58)),
+    ('Indie Senja Akustik', 'Indie Indonesia Senja', Color(0xFF8E3B46)),
+    ('Imersif Spasial 3D', 'dolby atmos spatial audio music', Color(0xFF2B59C3)),
+    ('Podcast & Video Show', 'podcast indonesia populer', Color(0xFF9C4A1A)),
+    ('Audiobook Tanpa Batas', 'audiobook indonesia full', Color(0xFF3A506B)),
+    ('Hip-Hop & R&B', 'hip hop rnb hits', Color(0xFF5A2A82)),
+    ('Live Events & Konser', 'live session concert indonesia', Color(0xFF1E555C)),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _textController = TextEditingController(
+      text: ref.read(searchQueryProvider),
+    );
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _textController.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        ref.read(searchQueryProvider.notifier).state = value;
+      }
+    });
+  }
+
+  void _submitImmediate(String value) {
+    _debounce?.cancel();
+    _textController.text = value;
+    ref.read(searchQueryProvider.notifier).state = value;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = ref.watch(searchQueryProvider);
+    final activeFilter = ref.watch(searchFilterProvider);
+    final resultsAsync = ref.watch(searchResultsProvider);
+    final exploreAsync = ref.watch(exploreDataProvider);
+    final playerState = ref.watch(playerControllerProvider);
+    final libraryState = ref.watch(libraryProvider);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isMobile =
+        MediaQuery.sizeOf(context).width < OmniXTokens.breakpointTablet;
+    final viewInsetsBottom = MediaQuery.viewInsetsOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        isMobile ? 16 : 28,
+        isMobile ? 16 : 24,
+        isMobile ? 16 : 28,
+        0,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Cari & Jelajah Katalog',
+            style: theme.textTheme.headlineMedium,
+          ),
+          const SizedBox(height: 12),
+          Semantics(
+            textField: true,
+            label: 'Cari lagu, album, artis, podcast, audiobook, atau penggalan lirik',
+            child: TextField(
+              controller: _textController,
+              onChanged: _onQueryChanged,
+              onSubmitted: _submitImmediate,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                labelText: 'Lagu, artis, podcast, audiobook, atau lirik...',
+                hintText: 'Ketik kata kunci atau pilih tag populer di bawah',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (query.isNotEmpty)
+                      IconButton(
+                        tooltip: 'Bersihkan pencarian',
+                        onPressed: () => _submitImmediate(''),
+                        icon: const Icon(Icons.clear),
+                      ),
+                    IconButton(
+                      tooltip: 'Pencarian suara',
+                      onPressed: () => _showVoiceSearchSheet(context),
+                      icon: const Icon(Icons.mic_none_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final (value, label) in _filters) ...[
+                  _FilterPillButton(
+                    label: label,
+                    selected: activeFilter == value,
+                    onTap: () {
+                      ref.read(searchFilterProvider.notifier).state = value;
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: query.trim().isEmpty
+                ? _buildDiscoveryBrowse(
+                    context,
+                    exploreAsync.valueOrNull,
+                    playerState,
+                    libraryState,
+                    widget.bottomSafePadding + viewInsetsBottom,
+                  )
+                : resultsAsync.when(
+                    loading: () => Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: scheme.primary),
+                          const SizedBox(height: 14),
+                          Text(
+                            'Mencari "$query" di katalog OmniX...',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                        ],
+                      ),
+                    ),
+                    error: (err, _) => Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 440),
+                        child: LiquidGlassBox(
+                          tier: GlassTier.glass2,
+                          borderRadius: OmniXTokens.radiusCard,
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Pencarian Gagal Dimuat',
+                                style: theme.textTheme.titleLarge,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                err.toString(),
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: () =>
+                                    ref.invalidate(searchResultsProvider),
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Coba Cari Lagi'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    data: (tracks) {
+                      if (tracks.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.search_off,
+                                size: 48,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Tidak ditemukan hasil untuk "$query".',
+                                style: theme.textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Periksa kata kunci atau ubah filter pencarian ke Semua.',
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      return ListView.separated(
+                        padding: EdgeInsets.only(
+                          bottom: widget.bottomSafePadding + viewInsetsBottom,
+                        ),
+                        itemCount: tracks.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final track = tracks[index];
+                          return TrackTile(
+                            track: track,
+                            isActive:
+                                playerState.currentTrack?.videoId == track.videoId,
+                            isPlaying: playerState.isPlaying &&
+                                playerState.currentTrack?.videoId == track.videoId,
+                            isLiked: libraryState.isLiked(track.videoId),
+                            isDownloaded:
+                                libraryState.isDownloaded(track.videoId),
+                            onPlay: () {
+                              ref
+                                  .read(playerControllerProvider.notifier)
+                                  .selectTrack(track, customQueue: tracks);
+                            },
+                            onToggleLike: () {
+                              ref
+                                  .read(libraryProvider.notifier)
+                                  .toggleLike(track);
+                            },
+                            onToggleDownload: () {
+                              ref
+                                  .read(libraryProvider.notifier)
+                                  .toggleOfflineDownload(track);
+                            },
+                          );
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiscoveryBrowse(
+    BuildContext context,
+    ExploreDataModel? exploreData,
+    PlayerViewState playerState,
+    LibraryState libraryState,
+    double bottomPad,
+  ) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final tags = exploreData?.trendingTags ??
+        const [
+          '#PopIndo',
+          '#LoFiSenja',
+          '#Synthwave80s',
+          '#SpatialAudio3D',
+          '#IndieAkustik',
+          '#PodcastMalam',
+          '#AudiobookGratis',
+        ];
+    final ranked = exploreData?.rankedSearches ?? const [];
+
+    return ListView(
+      padding: EdgeInsets.only(bottom: bottomPad),
+      children: [
+        Text('Tag Pencarian Populer', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final tag in tags)
+              InkWell(
+                mouseCursor: SystemMouseCursors.click,
+                borderRadius: BorderRadius.circular(OmniXTokens.radiusPill),
+                onTap: () => _submitImmediate(tag.replaceAll('#', '')),
+                child: LiquidGlassBox(
+                  tier: GlassTier.glass3,
+                  borderRadius: OmniXTokens.radiusPill,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    tag,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        if (ranked.isNotEmpty) ...[
+          Text(
+            'Tangga Lagu Pencarian Teratas (01 sampai 05)',
+            style: theme.textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          for (int i = 0; i < ranked.length; i++) ...[
+            TrackTile(
+              track: ranked[i],
+              rankNumber: (i + 1).toString().padLeft(2, '0'),
+              isActive: playerState.currentTrack?.videoId == ranked[i].videoId,
+              isPlaying: playerState.isPlaying &&
+                  playerState.currentTrack?.videoId == ranked[i].videoId,
+              isLiked: libraryState.isLiked(ranked[i].videoId),
+              isDownloaded: libraryState.isDownloaded(ranked[i].videoId),
+              onPlay: () {
+                ref
+                    .read(playerControllerProvider.notifier)
+                    .selectTrack(ranked[i], customQueue: ranked);
+              },
+              onToggleLike: () {
+                ref.read(libraryProvider.notifier).toggleLike(ranked[i]);
+              },
+              onToggleDownload: () {
+                ref
+                    .read(libraryProvider.notifier)
+                    .toggleOfflineDownload(ranked[i]);
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
+          const SizedBox(height: 18),
+        ],
+        LiquidGlassBox(
+          tier: GlassTier.glass2,
+          borderRadius: OmniXTokens.radiusCard,
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 30,
+                backgroundColor: scheme.primary.withValues(alpha: 0.25),
+                child: Icon(Icons.stadium_rounded, color: scheme.primary, size: 30),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Sorotan Artis & Hub Live Events Terdekat',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Jelajahi diskografi penuh, rilis baru, dan jadwal konser langsung di kota Anda.',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton(
+                onPressed: () => _submitImmediate('Live Session Indonesia'),
+                child: const Text('Lihat Live'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        Text(
+          'Jelajah Genre, Mood & Hub Audio',
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cols = constraints.maxWidth >= 720 ? 4 : 2;
+            final spacing = 12.0;
+            final cardWidth =
+                (constraints.maxWidth - (spacing * (cols - 1))) / cols;
+
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final (title, queryText, color) in _genreCards)
+                  SizedBox(
+                    width: cardWidth,
+                    height: 92,
+                    child: InkWell(
+                      mouseCursor: SystemMouseCursors.click,
+                      borderRadius:
+                          BorderRadius.circular(OmniXTokens.radiusCard),
+                      onTap: () => _submitImmediate(queryText),
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius:
+                              BorderRadius.circular(OmniXTokens.radiusCard),
+                        ),
+                        alignment: Alignment.bottomLeft,
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  void _showVoiceSearchSheet(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Pencarian Suara OmniX'),
+          content: const Text(
+            'Pilih contoh perintah suara untuk langsung mencari lagu, lirik, atau podcast:',
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _submitImmediate('Hindia Evaluasi');
+              },
+              child: const Text('"Putar Hindia Evaluasi"'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _submitImmediate('Lofi Hujan Malam');
+              },
+              child: const Text('"Putar Lofi Hujan Malam"'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _FilterPillButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FilterPillButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      mouseCursor: SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(OmniXTokens.radiusPill),
+      onTap: onTap,
+      child: LiquidGlassBox(
+        tier: GlassTier.glass3,
+        borderRadius: OmniXTokens.radiusPill,
+        tintColor: selected ? scheme.primary : null,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? scheme.onPrimary : scheme.onSurface,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+}

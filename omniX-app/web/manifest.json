@@ -1,0 +1,18 @@
+{
+    "name": "OmniX",
+    "short_name": "OmniX",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#0B0B10",
+    "theme_color": "#7C5CFF",
+    "description": "OmniX Liquid Glass Multi-Platform Music Player",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "favicon.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
