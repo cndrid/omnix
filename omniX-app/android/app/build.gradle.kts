@@ -36,6 +36,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+    lint {
+        // Lint release crash di CI (NoSuchMethodError List.removeLast() di CommentDetector);
+        // matikan lint saat build release, APK tidak butuh hasil lint.
+        checkRelease = false
+    }
 }
 
 kotlin {
