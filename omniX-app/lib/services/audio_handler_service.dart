@@ -37,7 +37,15 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
     );
     mediaItem.add(item);
 
-    await _player.setUrl(streamUrl, initialPosition: startPosition);
+    await _player.setUrl(
+      streamUrl,
+      initialPosition: startPosition,
+      // Googlevideo kadang menolak request tanpa User-Agent browser.
+      headers: const {
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+      },
+    );
     await _player.play();
   }
 
