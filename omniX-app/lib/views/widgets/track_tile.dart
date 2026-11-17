@@ -14,8 +14,11 @@ class TrackTile extends ConsumerStatefulWidget {
   final bool isLiked;
   final bool isDownloaded;
   final VoidCallback onPlay;
-  final VoidCallback onToggleLike;
+  final VoidCallback? onToggleLike;
   final VoidCallback? onToggleDownload;
+  /// Sembunyikan aksi baris (antrean/unduh/suka) untuk hasil semu seperti
+  /// artis & playlist — mengetuknya membuka hasil, bukan memutar lagu.
+  final bool showActions;
 
   const TrackTile({
     super.key,
@@ -26,8 +29,9 @@ class TrackTile extends ConsumerStatefulWidget {
     required this.isLiked,
     this.isDownloaded = false,
     required this.onPlay,
-    required this.onToggleLike,
+    this.onToggleLike,
     this.onToggleDownload,
+    this.showActions = true,
   });
 
   @override
@@ -175,26 +179,28 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                             ),
                             const SizedBox(width: 4),
                           ],
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: scheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: scheme.outline),
-                            ),
-                            child: Text(
-                              widget.track.audioQualityBadge,
-                              style: TextStyle(
-                                color: scheme.onSurface,
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w700,
+                          if (widget.track.audioQualityBadge.isNotEmpty) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: scheme.outline),
+                              ),
+                              child: Text(
+                                widget.track.audioQualityBadge,
+                                style: TextStyle(
+                                  color: scheme.onSurface,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
+                            const SizedBox(width: 6),
+                          ],
                           Expanded(
                             child: Text(
                               widget.track.album != null
@@ -218,7 +224,8 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                     style: theme.textTheme.bodyMedium,
                   ),
                 ],
-                PopupMenuButton<String>(
+                if (widget.showActions) ...[
+                  PopupMenuButton<String>(
                   tooltip: 'Tambah ke Antrean (${widget.track.title})',
                   icon: Icon(
                     Icons.playlist_add_rounded,
@@ -291,7 +298,7 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                   IconButton(
                     tooltip: widget.isDownloaded
                         ? 'Hapus unduhan offline ${widget.track.title}'
-                        : 'Unduh offline ${widget.track.title} (Gratis FLAC)',
+                        : 'Unduh offline ${widget.track.title}',
                     onPressed: widget.onToggleDownload,
                     icon: Icon(
                       widget.isDownloaded
@@ -316,6 +323,7 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                     size: 20,
                   ),
                 ),
+                ],
               ],
             ),
           ),

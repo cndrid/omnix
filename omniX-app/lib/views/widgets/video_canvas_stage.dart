@@ -79,34 +79,16 @@ class _VideoCanvasStageState extends State<VideoCanvasStage>
     _loadedVideoKey = null;
   }
 
-  String? _buildStreamUrl() {
-    final fromDetail = widget.detail?.videoStreamUrl;
-    if (fromDetail != null && fromDetail.isNotEmpty) {
-      return fromDetail;
-    }
-    final vid = widget.track.videoId;
-    if (vid.isNotEmpty && widget.controller.backendBaseUrl.isNotEmpty) {
-      final base = widget.controller.backendBaseUrl;
-      final titleParam = Uri.encodeComponent(widget.track.title);
-      final artistParam = Uri.encodeComponent(widget.track.artistLine);
-      return '$base/api/stream-video/$vid?title=$titleParam&artist=$artistParam';
-    }
-    return null;
-  }
-
   Future<void> _syncVideoSource() async {
     if (widget.playerState.mode == PlaybackMode.canvas) {
       // Canvas uses the 60fps reactive motion visualizer immediately without waiting.
       return;
     }
 
-    // Ekstraksi video di HP dulu (IP pengguna tidak diblokir YouTube);
-    // URL dari backend dipakai sebagai fallback kalau ekstraksi gagal.
-    final localUrl =
+    // Video diambil langsung di HP (ekstraksi InnerTube) — tidak ada
+    // lagi fallback backend. Kalau gagal, tampilkan visualizer.
+    final streamUrl =
         await StreamExtractor.extractVideoUrl(widget.track.videoId);
-    final streamUrl = (localUrl != null && localUrl.isNotEmpty)
-        ? localUrl
-        : _buildStreamUrl();
     if (streamUrl == null || streamUrl.isEmpty) {
       setState(() {
         _isVideoLoading = false;

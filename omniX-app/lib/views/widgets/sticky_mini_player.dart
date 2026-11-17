@@ -202,19 +202,19 @@ class _StickyMiniPlayerState extends ConsumerState<StickyMiniPlayer> {
                                   height: 20,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.2,
-                                    color: scheme.primary,
+                                    color: scheme.secondary,
                                   ),
                                 )
                               : Icon(
                                   playerState.isPlaying
                                       ? Icons.pause_circle_filled_rounded
                                       : Icons.play_circle_fill_rounded,
-                                  color: scheme.onSurface,
+                                  color: scheme.secondary,
                                   size: 32,
                                 ),
                         ),
                         IconButton(
-                          tooltip: 'Lewati ke lagu berikutnya (Tanpa Batas)',
+                          tooltip: 'Lagu berikutnya',
                           onPressed: controller.skipNext,
                           icon: Icon(
                             Icons.skip_next_rounded,
@@ -229,7 +229,7 @@ class _StickyMiniPlayerState extends ConsumerState<StickyMiniPlayer> {
                     value: playerState.progressFraction,
                     minHeight: 2.5,
                     backgroundColor: scheme.outline.withValues(alpha: 0.4),
-                    valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                    valueColor: AlwaysStoppedAnimation<Color>(scheme.secondary),
                   ),
                 ],
               ),
