@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart';
 import '../models/track_model.dart';
 import '../services/api_service.dart';
 import '../services/audio_handler_service.dart';
+import '../services/stream_extractor.dart';
 
 enum AppTab { beranda, cari, koleksi, profil }
 
@@ -616,10 +617,17 @@ class PlayerController extends StateNotifier<PlayerViewState> {
         isLoadingTrack: false,
       );
 
-      if (detail.audioStreamUrl != null && detail.audioStreamUrl!.isNotEmpty) {
+      // Ekstraksi stream di HP (IP pengguna tidak diblokir YouTube);
+      // URL dari backend dipakai sebagai fallback kalau ekstraksi gagal.
+      String? streamUrl = detail.audioStreamUrl;
+      final localUrl = await StreamExtractor.extractAudioUrl(track.videoId);
+      if (localUrl != null && localUrl.isNotEmpty) {
+        streamUrl = localUrl;
+      }
+      if (streamUrl != null && streamUrl.isNotEmpty) {
         await _audioHandler.loadAndPlay(
           track: track,
-          streamUrl: detail.audioStreamUrl!,
+          streamUrl: streamUrl,
         );
       } else {
         state = state.copyWith(
