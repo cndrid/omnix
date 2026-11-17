@@ -1,5 +1,5 @@
 name: omnix_app
-description: Cross-platform YouTube Music client built with Flutter, Riverpod, just_audio, and Chewie. Fully client-side: search, metadata, lyrics and streams run on the device, no cloud backend.
+description: Cross-platform YouTube Music client built with Flutter, Riverpod, just_audio, and Chewie. Fully client-side, no cloud backend.
 publish_to: "none"
 version: 1.0.0+2
 
