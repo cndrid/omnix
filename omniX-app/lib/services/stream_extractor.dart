@@ -17,22 +17,38 @@ class StreamExtractor {
   /// Utamakan m4a (container mp4, itag 140) karena bisa diputar di semua
   /// platform (Android, iOS, Windows); kalau tidak ada, bitrate tertinggi.
   static Future<String?> extractAudioUrl(String videoId) async {
+    final urls = await extractAudioUrls(videoId);
+    return urls.isEmpty ? null : urls.first;
+  }
+
+  /// Daftar kandidat URL audio untuk [videoId], terurut dari yang terbaik:
+  /// audio-only (m4a dulu, lalu bitrate tertinggi), lalu muxed.
+  /// Dipakai pemutar untuk mencoba satu per satu kalau URL pertama gagal
+  /// dimuat (mis. format ditolak player). List kosong kalau ekstraksi
+  /// gagal total.
+  static Future<List<String>> extractAudioUrls(String videoId) async {
     final yt = YoutubeExplode();
     try {
       final manifest = await yt.videos.streamsClient
           .getManifest(videoId)
           .timeout(_timeout);
+      final urls = <String>[];
       final audioOnly = manifest.audioOnly.toList();
-      if (audioOnly.isEmpty) return null;
       audioOnly.sort((a, b) {
         final aMp4 = a.container.name == 'mp4' ? 0 : 1;
         final bMp4 = b.container.name == 'mp4' ? 0 : 1;
         if (aMp4 != bMp4) return aMp4 - bMp4;
         return b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond);
       });
-      return audioOnly.first.url.toString();
+      urls.addAll(audioOnly.map((s) => s.url.toString()));
+      final muxed = manifest.muxed.toList();
+      muxed.sort(
+        (a, b) => b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond),
+      );
+      urls.addAll(muxed.map((s) => s.url.toString()));
+      return urls;
     } catch (_) {
-      return null;
+      return const [];
     } finally {
       yt.close();
     }
