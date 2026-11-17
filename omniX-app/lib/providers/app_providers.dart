@@ -617,21 +617,30 @@ class PlayerController extends StateNotifier<PlayerViewState> {
         isLoadingTrack: false,
       );
 
-      // Ekstraksi stream di HP (IP pengguna tidak diblokir YouTube);
-      // URL dari backend dipakai sebagai fallback kalau ekstraksi gagal.
-      String? streamUrl = detail.audioStreamUrl;
-      final localUrl = await StreamExtractor.extractAudioUrl(track.videoId);
-      if (localUrl != null && localUrl.isNotEmpty) {
-        streamUrl = localUrl;
+      // Ekstraksi stream di HP (IP pengguna tidak diblokir YouTube).
+      // Coba kandidat satu per satu: kalau URL pertama gagal dimuat
+      // (mis. format ditolak player), coba format berikutnya, terakhir
+      // URL dari backend.
+      final candidates = await StreamExtractor.extractAudioUrls(track.videoId);
+      if (detail.audioStreamUrl != null &&
+          detail.audioStreamUrl!.isNotEmpty) {
+        candidates.add(detail.audioStreamUrl!);
       }
-      if (streamUrl != null && streamUrl.isNotEmpty) {
-        await _audioHandler.loadAndPlay(
-          track: track,
-          streamUrl: streamUrl,
-        );
-      } else {
+      String? lastError;
+      var played = false;
+      for (final url in candidates) {
+        try {
+          await _audioHandler.loadAndPlay(track: track, streamUrl: url);
+          played = true;
+          break;
+        } catch (e) {
+          lastError = e.toString();
+        }
+      }
+      if (!played) {
         state = state.copyWith(
-          errorMessage: 'Stream audio langsung tidak tersedia untuk lagu ini.',
+          errorMessage: lastError ??
+              'Stream audio langsung tidak tersedia untuk lagu ini.',
         );
       }
     } catch (e) {
