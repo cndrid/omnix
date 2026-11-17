@@ -127,7 +127,14 @@ class _VideoCanvasStageState extends State<VideoCanvasStage>
     });
 
     try {
-      final vCtrl = VideoPlayerController.networkUrl(Uri.parse(streamUrl));
+      final vCtrl = VideoPlayerController.networkUrl(
+        Uri.parse(streamUrl),
+        // Googlevideo kadang menolak request tanpa User-Agent browser.
+        httpHeaders: const {
+          'User-Agent':
+              'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        },
+      );
       await vCtrl.initialize().timeout(const Duration(seconds: 12));
       await vCtrl.setVolume(0.0);
       await vCtrl.setLooping(true);
