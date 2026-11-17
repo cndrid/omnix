@@ -1,17 +1,19 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class OmniXTokens {
-  // OmniX Master PRD Tokens
-  static const Color darkCanvas = Color(0xFF0B0B10);
-  static const Color darkSurface = Color(0xFF16161D);
-  static const Color darkSurfaceElevated = Color(0xFF20202B);
-  static const Color darkBorder = Color(0xFF2E2E3D);
-  static const Color darkTextPrimary = Color(0xFFFFFFFF);
-  static const Color darkTextSecondary = Color(0xFFA7A7B3);
-  static const Color darkAccent = Color(0xFF7C5CFF);
-  static const Color darkAccentBright = Color(0xFFA58FFF);
-  static const Color successGreen = Color(0xFF3DDC84);
+  // Token dari design system "music streaming app dark premium"
+  // (ui-ux-pro-max --design-system): Dark Mode OLED.
+  static const Color darkCanvas = Color(0xFF0F0F23);
+  static const Color darkSurface = Color(0xFF1B1B30);
+  static const Color darkSurfaceElevated = Color(0xFF23233F);
+  static const Color darkBorder = Color(0xFF312E81);
+  static const Color darkTextPrimary = Color(0xFFF8FAFC);
+  static const Color darkTextSecondary = Color(0xFF94A3B8);
+  static const Color darkAccent = Color(0xFF4338CA);
+  static const Color darkAccentBright = Color(0xFF818CF8);
+  static const Color successGreen = Color(0xFF22C55E);
   static const Color dangerRed = Color(0xFFFF5C5C);
 
   static const Color lightCanvas = Color(0xFFF6F6FB);
@@ -20,7 +22,7 @@ class OmniXTokens {
   static const Color lightBorder = Color(0xFFD0D0E0);
   static const Color lightTextPrimary = Color(0xFF111118);
   static const Color lightTextSecondary = Color(0xFF48485A);
-  static const Color lightAccent = Color(0xFF522ED3);
+  static const Color lightAccent = Color(0xFF4338CA);
 
   static const double radiusThumb = 12.0;
   static const double radiusInput = 16.0;
@@ -106,45 +108,47 @@ class OmniXTheme {
       hoverColor: textPrimary.withValues(alpha: 0.06),
       splashColor: accent.withValues(alpha: 0.14),
       dividerColor: border,
-      textTheme: TextTheme(
-        headlineMedium: TextStyle(
-          color: textPrimary,
-          fontSize: 26,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.4,
-          height: 1.2,
-        ),
-        titleLarge: TextStyle(
-          color: textPrimary,
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.2,
-          height: 1.25,
-        ),
-        titleMedium: TextStyle(
-          color: textPrimary,
-          fontSize: 15.5,
-          fontWeight: FontWeight.w600,
-          height: 1.3,
-        ),
-        bodyLarge: TextStyle(
-          color: textPrimary,
-          fontSize: 15,
-          fontWeight: FontWeight.w400,
-          height: 1.45,
-        ),
-        bodyMedium: TextStyle(
-          color: textSecondary,
-          fontSize: 13.5,
-          fontWeight: FontWeight.w400,
-          height: 1.4,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-        labelLarge: TextStyle(
-          color: textPrimary,
-          fontSize: 13.5,
-          fontWeight: FontWeight.w600,
-          fontFeatures: const [FontFeature.tabularFigures()],
+      textTheme: GoogleFonts.interTextTheme(
+        TextTheme(
+          headlineMedium: TextStyle(
+            color: textPrimary,
+            fontSize: 26,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.4,
+            height: 1.2,
+          ),
+          titleLarge: TextStyle(
+            color: textPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.2,
+            height: 1.25,
+          ),
+          titleMedium: TextStyle(
+            color: textPrimary,
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            height: 1.3,
+          ),
+          bodyLarge: TextStyle(
+            color: textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.w400,
+            height: 1.45,
+          ),
+          bodyMedium: TextStyle(
+            color: textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w400,
+            height: 1.4,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+          labelLarge: TextStyle(
+            color: textPrimary,
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
       ),
       cardTheme: CardThemeData(
