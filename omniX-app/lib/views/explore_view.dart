@@ -19,9 +19,6 @@ class ExploreView extends ConsumerWidget {
   static const List<String> _categories = [
     'Semua',
     'Musik',
-    'Podcast',
-    'Audiobooks',
-    'Imersif Spasial',
   ];
 
   String _contextualGreeting(String? userName) {
@@ -65,7 +62,7 @@ class ExploreView extends ConsumerWidget {
               CircularProgressIndicator(color: scheme.primary),
               const SizedBox(height: 16),
               Text(
-                'Menyiapkan Beranda OmniX (FLAC 24-bit & Bebas Iklan)...',
+                'Menyiapkan Beranda…',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge,
               ),
@@ -137,11 +134,6 @@ class ExploreView extends ConsumerWidget {
         final filteredSections = exploreData.sections.where((sec) {
           if (activeCategory == 'Semua') return true;
           if (activeCategory == 'Musik') return sec.category == 'music';
-          if (activeCategory == 'Podcast') return sec.category == 'podcast';
-          if (activeCategory == 'Audiobooks') return sec.category == 'audiobook';
-          if (activeCategory == 'Imersif Spasial') {
-            return sec.category == 'spatial';
-          }
           return true;
         }).toList();
 
@@ -165,7 +157,6 @@ class ExploreView extends ConsumerWidget {
               theme,
               scheme,
               engineState,
-              allTracks,
             ),
             const SizedBox(height: 16),
             SingleChildScrollView(
@@ -185,31 +176,18 @@ class ExploreView extends ConsumerWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 22),
-            _buildAiAndSocialQuickRow(
+            const SizedBox(height: 24),
+            _buildAiQuickRow(
               context,
               ref,
               theme,
               scheme,
-              playerState,
-              allTracks,
             ),
             const SizedBox(height: 24),
             if (quickRecents.isNotEmpty) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Terakhir & Sering Diputar (Instant-to-Play)',
-                      style: theme.textTheme.titleLarge,
-                    ),
-                  ),
-                  Text(
-                    'Ketuk putar / + Antrean',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ],
+              Text(
+                'Baru diputar',
+                style: theme.textTheme.titleLarge,
               ),
               const SizedBox(height: 12),
               _QuickRecentsGrid(
@@ -233,7 +211,7 @@ class ExploreView extends ConsumerWidget {
                   );
                 },
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
             ],
             if (heroTrack != null) ...[
               _HeroShowcaseCard(
@@ -264,7 +242,7 @@ class ExploreView extends ConsumerWidget {
                   );
                 },
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
             ],
             if (exploreData.topArtists.isNotEmpty) ...[
               Text(
@@ -291,7 +269,7 @@ class ExploreView extends ConsumerWidget {
                   },
                 ),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
             ],
             for (final section in displaySections) ...[
               Row(
@@ -347,7 +325,7 @@ class ExploreView extends ConsumerWidget {
                       .toggleOfflineDownload(track);
                 },
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
             ],
           ],
         );
@@ -361,54 +339,31 @@ class ExploreView extends ConsumerWidget {
     ThemeData theme,
     ColorScheme scheme,
     AudioEngineSettingsState engineState,
-    List<TrackModel> allTracks,
   ) {
-    return Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      runSpacing: 12,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _contextualGreeting(engineState.userDisplayName),
-              style: theme.textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.verified_rounded, size: 15, color: scheme.secondary),
-                const SizedBox(width: 6),
-                Text(
-                  'OmniX Hi-Res Master · ${engineState.audioQuality} · Gratis Tanpa Iklan',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.secondary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ],
+        Text(
+          _contextualGreeting(engineState.userDisplayName),
+          style: theme.textTheme.headlineMedium,
         ),
-        OutlinedButton.icon(
-          onPressed: () => _showWrappedDialog(context, allTracks),
-          icon: const Icon(Icons.auto_graph_rounded, size: 18),
-          label: const Text('OmniX Wrapped 2026'),
+        const SizedBox(height: 4),
+        Text(
+          'Musik dari YouTube, langsung dari HP kamu.',
+          style: theme.textTheme.bodyMedium,
         ),
       ],
     );
   }
 
-  Widget _buildAiAndSocialQuickRow(
+  /// Satu aksi utama per layar: AI DJ. Antrean ada di mini player &
+  /// pemutar; prompt playlist jadi aksi sekunder di sampingnya.
+  /// Sesi Jam dihapus: butuh server, dan aplikasi kini client-side.
+  Widget _buildAiQuickRow(
     BuildContext context,
     WidgetRef ref,
     ThemeData theme,
     ColorScheme scheme,
-    PlayerViewState playerState,
-    List<TrackModel> allTracks,
   ) {
     return Wrap(
       spacing: 10,
@@ -421,31 +376,12 @@ class ExploreView extends ConsumerWidget {
                 .startAiDj(mood: 'Lofi Fokus & Energi Malam');
           },
           icon: const Icon(Icons.record_voice_over_rounded, size: 18),
-          label: const Text('Mulai AI DJ (Gratis)'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => showQueueManagerSheet(context, ref),
-          icon: const Icon(Icons.queue_music_rounded, size: 20),
-          label: Text('Kelola Antrean (${playerState.queue.length})'),
+          label: const Text('Mulai AI DJ'),
         ),
         OutlinedButton.icon(
           onPressed: () => _showPromptPlaylistDialog(context, ref),
           icon: const Icon(Icons.playlist_add_check_rounded, size: 20),
-          label: const Text('AI Playlist dari Prompt'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () {
-            ref.read(audioEngineProvider.notifier).toggleJamSession();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Sesi Jam Real-Time aktif (Kode: OMNIX-8824). Semua teman dapat bergabung gratis.',
-                ),
-              ),
-            );
-          },
-          icon: const Icon(Icons.groups_rounded, size: 20),
-          label: const Text('Mulai Sesi Jam Bersama'),
+          label: const Text('Playlist dari Prompt'),
         ),
       ],
     );
@@ -465,7 +401,7 @@ class ExploreView extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Ketik suasana hati, aktivitas, atau genre. Sistem akan menyusun playlist Lossless secara otomatis tanpa batasan:',
+                'Ketik suasana hati, aktivitas, atau genre. Sistem akan menyusun playlist dari hasil pencarian YouTube:',
               ),
               const SizedBox(height: 12),
               TextField(
@@ -498,44 +434,6 @@ class ExploreView extends ConsumerWidget {
                 }
               },
               child: const Text('Buat & Putar Sekarang'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showWrappedDialog(BuildContext context, List<TrackModel> tracks) {
-    final topTrack = tracks.isNotEmpty ? tracks.first.title : 'Lofi Senja';
-    final topArtist =
-        tracks.isNotEmpty ? tracks.first.artistLine : 'Hindia & NIKI';
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('OmniX Wrapped 2026'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Rangkuman perjalanan dengar Anda sepanjang tahun dalam kualitas Lossless 24-bit:',
-              ),
-              const SizedBox(height: 14),
-              Text('• Lagu Paling Sering Diputar: $topTrack'),
-              const SizedBox(height: 6),
-              Text('• Artis Teratas: $topArtist'),
-              const SizedBox(height: 6),
-              const Text('• Genre Utama: Indonesian Indie, Lo-Fi Focus, Spatial 3D'),
-              const SizedBox(height: 6),
-              const Text('• Kualitas Audio: 100% Lossless FLAC 24-bit / 96kHz'),
-            ],
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Tutup Rangkuman'),
             ),
           ],
         );
@@ -740,23 +638,6 @@ class _HeroShowcaseCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: scheme.primary.withValues(alpha: 0.22),
-            borderRadius: BorderRadius.circular(OmniXTokens.radiusPill),
-            border: Border.all(color: scheme.primary),
-          ),
-          child: Text(
-            'KURASI UNGGULAN · FLAC 24-BIT / 96KHZ · SPATIAL 3D',
-            style: TextStyle(
-              color: scheme.onSurface,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
         Text(
           track.title,
           style: theme.textTheme.headlineMedium,
@@ -765,7 +646,7 @@ class _HeroShowcaseCard extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          '${track.artistLine} · Lofi Senja & Hujan Tropis',
+          track.artistLine,
           style: theme.textTheme.bodyLarge?.copyWith(
             color: scheme.onSurfaceVariant,
           ),
@@ -783,15 +664,13 @@ class _HeroShowcaseCard extends StatelessWidget {
                     : Icons.play_arrow_rounded,
               ),
               label: Text(
-                isActive && isPlaying
-                    ? 'Buka Layar Sedang Diputar'
-                    : 'Putar Lossless Sekarang',
+                isActive && isPlaying ? 'Buka Pemutar' : 'Putar',
               ),
             ),
             OutlinedButton.icon(
               onPressed: onAddQueue,
               icon: const Icon(Icons.playlist_add_rounded, size: 20),
-              label: const Text('+ Tambah ke Antrean'),
+              label: const Text('+ Antrean'),
             ),
           ],
         ),

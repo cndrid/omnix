@@ -24,28 +24,23 @@ class _SearchViewState extends ConsumerState<SearchView> {
   Timer? _debounce;
 
   static const List<(String, String)> _filters = [
+    ('all', 'Semua'),
     ('songs', 'Lagu'),
-    ('videos', 'Video Musik'),
-    ('albums', 'Album'),
     ('artists', 'Artis'),
     ('playlists', 'Playlist'),
-    ('podcasts', 'Podcast'),
-    ('audiobooks', 'Audiobook Gratis'),
-    ('lyrics', 'Lirik'),
-    ('spatial', 'Spasial 3D'),
-    ('all', 'Semua'),
   ];
 
   static const List<(String, String, Color)> _genreCards = [
     ('Pop Indonesia', 'Lagu Pop Indonesia Terbaru', Color(0xFF6340F5)),
     ('Lo-Fi & Fokus Kerja', 'lofi chill beats focus', Color(0xFF1F6E58)),
     ('Indie Senja Akustik', 'Indie Indonesia Senja', Color(0xFF8E3B46)),
-    ('Imersif Spasial 3D', 'dolby atmos spatial audio music', Color(0xFF2B59C3)),
-    ('Podcast & Video Show', 'podcast indonesia populer', Color(0xFF9C4A1A)),
-    ('Audiobook Tanpa Batas', 'audiobook indonesia full', Color(0xFF3A506B)),
     ('Hip-Hop & R&B', 'hip hop rnb hits', Color(0xFF5A2A82)),
-    ('Live Events & Konser', 'live session concert indonesia', Color(0xFF1E555C)),
+    ('Live Session', 'live session concert indonesia', Color(0xFF1E555C)),
   ];
+
+  List<TrackModel>? _playlistTracks;
+  String? _playlistTitle;
+  bool _playlistLoading = false;
 
   @override
   void initState() {
@@ -66,6 +61,10 @@ class _SearchViewState extends ConsumerState<SearchView> {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       if (mounted) {
+        setState(() {
+          _playlistTitle = null;
+          _playlistTracks = null;
+        });
         ref.read(searchQueryProvider.notifier).state = value;
       }
     });
@@ -74,7 +73,37 @@ class _SearchViewState extends ConsumerState<SearchView> {
   void _submitImmediate(String value) {
     _debounce?.cancel();
     _textController.text = value;
+    setState(() {
+      _playlistTitle = null;
+      _playlistTracks = null;
+    });
     ref.read(searchQueryProvider.notifier).state = value;
+  }
+
+  Future<void> _openPlaylist(TrackModel playlist) async {
+    setState(() {
+      _playlistTitle = playlist.title;
+      _playlistTracks = null;
+      _playlistLoading = true;
+    });
+    try {
+      final tracks = await ref
+          .read(apiServiceProvider)
+          .getPlaylistVideos(playlist.videoId);
+      if (mounted) {
+        setState(() {
+          _playlistTracks = tracks;
+          _playlistLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _playlistTracks = const [];
+          _playlistLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -102,38 +131,29 @@ class _SearchViewState extends ConsumerState<SearchView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Cari & Jelajah Katalog',
+            'Cari',
             style: theme.textTheme.headlineMedium,
           ),
           const SizedBox(height: 12),
           Semantics(
             textField: true,
-            label: 'Cari lagu, album, artis, podcast, audiobook, atau penggalan lirik',
+            label: 'Cari lagu, artis, atau playlist',
             child: TextField(
               controller: _textController,
               onChanged: _onQueryChanged,
               onSubmitted: _submitImmediate,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                labelText: 'Lagu, artis, podcast, audiobook, atau lirik...',
+                labelText: 'Lagu, artis, atau playlist...',
                 hintText: 'Ketik kata kunci atau pilih tag populer di bawah',
                 prefixIcon: const Icon(Icons.search),
-                suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (query.isNotEmpty)
-                      IconButton(
+                suffixIcon: query.isNotEmpty
+                    ? IconButton(
                         tooltip: 'Bersihkan pencarian',
                         onPressed: () => _submitImmediate(''),
                         icon: const Icon(Icons.clear),
-                      ),
-                    IconButton(
-                      tooltip: 'Pencarian suara',
-                      onPressed: () => _showVoiceSearchSheet(context),
-                      icon: const Icon(Icons.mic_none_rounded),
-                    ),
-                  ],
-                ),
+                      )
+                    : null,
               ),
             ),
           ),
@@ -165,7 +185,14 @@ class _SearchViewState extends ConsumerState<SearchView> {
                     libraryState,
                     widget.bottomSafePadding + viewInsetsBottom,
                   )
-                : resultsAsync.when(
+                : _playlistTitle != null
+                    ? _buildPlaylistTracks(
+                        context,
+                        playerState,
+                        libraryState,
+                        viewInsetsBottom,
+                      )
+                    : resultsAsync.when(
                     loading: () => Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -245,6 +272,8 @@ class _SearchViewState extends ConsumerState<SearchView> {
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           final track = tracks[index];
+                          final isPseudo = track.resultType == 'artist' ||
+                              track.resultType == 'playlist';
                           return TrackTile(
                             track: track,
                             isActive:
@@ -254,21 +283,34 @@ class _SearchViewState extends ConsumerState<SearchView> {
                             isLiked: libraryState.isLiked(track.videoId),
                             isDownloaded:
                                 libraryState.isDownloaded(track.videoId),
+                            showActions: !isPseudo,
                             onPlay: () {
+                              if (track.resultType == 'artist') {
+                                _submitImmediate(track.title);
+                                return;
+                              }
+                              if (track.resultType == 'playlist') {
+                                _openPlaylist(track);
+                                return;
+                              }
                               ref
                                   .read(playerControllerProvider.notifier)
                                   .selectTrack(track, customQueue: tracks);
                             },
-                            onToggleLike: () {
-                              ref
-                                  .read(libraryProvider.notifier)
-                                  .toggleLike(track);
-                            },
-                            onToggleDownload: () {
-                              ref
-                                  .read(libraryProvider.notifier)
-                                  .toggleOfflineDownload(track);
-                            },
+                            onToggleLike: isPseudo
+                                ? null
+                                : () {
+                                    ref
+                                        .read(libraryProvider.notifier)
+                                        .toggleLike(track);
+                                  },
+                            onToggleDownload: isPseudo
+                                ? null
+                                : () {
+                                    ref
+                                        .read(libraryProvider.notifier)
+                                        .toggleOfflineDownload(track);
+                                  },
                           );
                         },
                       );
@@ -277,6 +319,102 @@ class _SearchViewState extends ConsumerState<SearchView> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPlaylistTracks(
+    BuildContext context,
+    PlayerViewState playerState,
+    LibraryState libraryState,
+    double viewInsetsBottom,
+  ) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    if (_playlistLoading) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: scheme.primary),
+            const SizedBox(height: 14),
+            Text(
+              'Memuat isi playlist…',
+              style: theme.textTheme.bodyLarge,
+            ),
+          ],
+        ),
+      );
+    }
+
+    final tracks = _playlistTracks ?? const [];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Kembali ke hasil pencarian',
+              onPressed: () => setState(() {
+                _playlistTitle = null;
+                _playlistTracks = null;
+              }),
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
+            Expanded(
+              child: Text(
+                _playlistTitle ?? 'Playlist',
+                style: theme.textTheme.titleLarge,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: tracks.isEmpty
+              ? Center(
+                  child: Text(
+                    'Playlist ini kosong.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                )
+              : ListView.separated(
+                  padding: EdgeInsets.only(
+                    bottom: widget.bottomSafePadding + viewInsetsBottom,
+                  ),
+                  itemCount: tracks.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final track = tracks[index];
+                    return TrackTile(
+                      track: track,
+                      isActive:
+                          playerState.currentTrack?.videoId == track.videoId,
+                      isPlaying: playerState.isPlaying &&
+                          playerState.currentTrack?.videoId == track.videoId,
+                      isLiked: libraryState.isLiked(track.videoId),
+                      isDownloaded:
+                          libraryState.isDownloaded(track.videoId),
+                      onPlay: () {
+                        ref
+                            .read(playerControllerProvider.notifier)
+                            .selectTrack(track, customQueue: tracks);
+                      },
+                      onToggleLike: () {
+                        ref.read(libraryProvider.notifier).toggleLike(track);
+                      },
+                      onToggleDownload: () {
+                        ref
+                            .read(libraryProvider.notifier)
+                            .toggleOfflineDownload(track);
+                      },
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
@@ -293,11 +431,9 @@ class _SearchViewState extends ConsumerState<SearchView> {
         const [
           '#PopIndo',
           '#LoFiSenja',
-          '#Synthwave80s',
-          '#SpatialAudio3D',
           '#IndieAkustik',
-          '#PodcastMalam',
-          '#AudiobookGratis',
+          '#DangdutKoplo',
+          '#LaguGalau',
         ];
     final ranked = exploreData?.rankedSearches ?? const [];
 
@@ -367,45 +503,9 @@ class _SearchViewState extends ConsumerState<SearchView> {
           ],
           const SizedBox(height: 18),
         ],
-        LiquidGlassBox(
-          tier: GlassTier.glass2,
-          borderRadius: OmniXTokens.radiusCard,
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 30,
-                backgroundColor: scheme.primary.withValues(alpha: 0.25),
-                child: Icon(Icons.stadium_rounded, color: scheme.primary, size: 30),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Sorotan Artis & Hub Live Events Terdekat',
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Jelajahi diskografi penuh, rilis baru, dan jadwal konser langsung di kota Anda.',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              FilledButton(
-                onPressed: () => _submitImmediate('Live Session Indonesia'),
-                child: const Text('Lihat Live'),
-              ),
-            ],
-          ),
-        ),
         const SizedBox(height: 24),
         Text(
-          'Jelajah Genre, Mood & Hub Audio',
+          'Jelajah Genre & Mood',
           style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: 12),
@@ -453,36 +553,6 @@ class _SearchViewState extends ConsumerState<SearchView> {
           },
         ),
       ],
-    );
-  }
-
-  void _showVoiceSearchSheet(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Pencarian Suara OmniX'),
-          content: const Text(
-            'Pilih contoh perintah suara untuk langsung mencari lagu, lirik, atau podcast:',
-          ),
-          actions: [
-            OutlinedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _submitImmediate('Hindia Evaluasi');
-              },
-              child: const Text('"Putar Hindia Evaluasi"'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _submitImmediate('Lofi Hujan Malam');
-              },
-              child: const Text('"Putar Lofi Hujan Malam"'),
-            ),
-          ],
-        );
-      },
     );
   }
 }

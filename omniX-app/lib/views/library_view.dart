@@ -19,7 +19,6 @@ class LibraryView extends ConsumerWidget {
     'Playlist',
     'Disukai',
     'Unduhan Offline',
-    'Folder Lokal',
   ];
 
   @override
@@ -27,11 +26,6 @@ class LibraryView extends ConsumerWidget {
     final libraryState = ref.watch(libraryProvider);
     final libraryCtrl = ref.read(libraryProvider.notifier);
     final playerState = ref.watch(playerControllerProvider);
-    final exploreData = ref.watch(exploreDataProvider).valueOrNull;
-    final seedTracks = [
-      for (final sec in exploreData?.sections ?? const <ExploreSectionModel>[])
-        ...sec.items,
-    ];
 
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -54,32 +48,12 @@ class LibraryView extends ConsumerWidget {
           spacing: 12,
           runSpacing: 12,
           children: [
-            Text('Koleksi & Penyimpanan Hi-Res', style: theme.textTheme.headlineMedium),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: () =>
-                      _showCreatePlaylistDialog(context, libraryCtrl, seedTracks),
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('+ Playlist Baru'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () =>
-                      _showCreateBlendDialog(context, libraryCtrl, seedTracks),
-                  icon: const Icon(Icons.join_inner_rounded, size: 18),
-                  label: const Text('Buat Blend'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    libraryCtrl.indexSampleLocalFolder(seedTracks);
-                    libraryCtrl.setCategoryChip('Folder Lokal');
-                  },
-                  icon: const Icon(Icons.folder_open_rounded, size: 18),
-                  label: const Text('Indeks Folder Lokal'),
-                ),
-              ],
+            Text('Koleksi', style: theme.textTheme.headlineMedium),
+            FilledButton.icon(
+              onPressed: () =>
+                  _showCreatePlaylistDialog(context, libraryCtrl),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('+ Playlist Baru'),
             ),
           ],
         ),
@@ -106,7 +80,6 @@ class LibraryView extends ConsumerWidget {
           theme,
           scheme,
           libraryState,
-          seedTracks,
         ),
         const SizedBox(height: 24),
         if (libraryState.activeCategoryChip == 'Semua' ||
@@ -146,12 +119,10 @@ class LibraryView extends ConsumerWidget {
             _PlaylistCard(
               playlist: pl,
               onPlay: () {
-                final tracksToPlay =
-                    pl.tracks.isNotEmpty ? pl.tracks : seedTracks;
-                if (tracksToPlay.isNotEmpty) {
+                if (pl.tracks.isNotEmpty) {
                   ref.read(playerControllerProvider.notifier).selectTrack(
-                        tracksToPlay.first,
-                        customQueue: tracksToPlay,
+                        pl.tracks.first,
+                        customQueue: pl.tracks,
                       );
                 }
               },
@@ -188,7 +159,7 @@ class LibraryView extends ConsumerWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Ketuk ikon hati atau ikon unduh pada lagu di Beranda dan Cari untuk menyimpannya secara gratis tanpa batas.',
+                  'Ketuk ikon hati atau ikon unduh pada lagu di Beranda dan Cari untuk menyimpannya di Koleksi.',
                   style: theme.textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -245,7 +216,6 @@ class LibraryView extends ConsumerWidget {
     return switch (state.activeCategoryChip) {
       'Disukai' => state.likedTracks,
       'Unduhan Offline' => state.offlineDownloadedTracks,
-      'Folder Lokal' => state.localFolderTracks,
       _ => [
           ...state.likedTracks,
           for (final t in state.offlineDownloadedTracks)
@@ -261,8 +231,7 @@ class LibraryView extends ConsumerWidget {
   String _sectionHeading(String chip, int count) {
     return switch (chip) {
       'Disukai' => 'Daftar Lagu Disukai ($count)',
-      'Unduhan Offline' => 'Tersimpan Offline FLAC 24-bit ($count)',
-      'Folder Lokal' => 'File Audio Lokal Perangkat ($count)',
+      'Unduhan Offline' => 'Tersimpan Offline ($count)',
       _ => 'Lagu Tersimpan & Terakhir Diputar ($count)',
     };
   }
@@ -273,7 +242,6 @@ class LibraryView extends ConsumerWidget {
     ThemeData theme,
     ColorScheme scheme,
     LibraryState libraryState,
-    List<TrackModel> seedTracks,
   ) {
     final usedMb = libraryState.estimatedOfflineStorageMb;
     return LayoutBuilder(
@@ -315,7 +283,7 @@ class LibraryView extends ConsumerWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          'DISEMATKAN · FLAC 24-BIT',
+                          'DISEMATKAN',
                           style: TextStyle(
                             color: scheme.secondary,
                             fontSize: 11,
@@ -330,7 +298,7 @@ class LibraryView extends ConsumerWidget {
                       style: theme.textTheme.titleLarge,
                     ),
                     Text(
-                      'Sinkronisasi offline otomatis tanpa batas',
+                      'Lagu yang kamu sukai',
                       style: theme.textTheme.bodyMedium,
                     ),
                   ],
@@ -339,9 +307,7 @@ class LibraryView extends ConsumerWidget {
               IconButton(
                 tooltip: 'Putar cepat Lagu Disukai',
                 onPressed: () {
-                  final list = libraryState.likedTracks.isNotEmpty
-                      ? libraryState.likedTracks
-                      : seedTracks;
+                  final list = libraryState.likedTracks;
                   if (list.isNotEmpty) {
                     ref
                         .read(playerControllerProvider.notifier)
@@ -369,11 +335,11 @@ class LibraryView extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Penyimpanan Hi-Res Audio (FLAC Status)',
+                    'Cache Audio Lokal',
                     style: theme.textTheme.titleMedium,
                   ),
                   Text(
-                    '${usedMb.toStringAsFixed(0)} MB / Tanpa Batas',
+                    '${usedMb.toStringAsFixed(0)} MB cache',
                     style: TextStyle(
                       color: scheme.secondary,
                       fontWeight: FontWeight.w700,
@@ -392,7 +358,7 @@ class LibraryView extends ConsumerWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Alokasi cache lokal SSD/Flash untuk streaming Lossless 24-bit/96kHz & unduhan offline gratis.',
+                'Cache lagu yang sudah diputar, supaya bisa diputar ulang tanpa mengunduh lagi.',
                 style: theme.textTheme.bodyMedium,
               ),
             ],
@@ -422,7 +388,6 @@ class LibraryView extends ConsumerWidget {
   void _showCreatePlaylistDialog(
     BuildContext context,
     LibraryController ctrl,
-    List<TrackModel> seedTracks,
   ) {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
@@ -475,10 +440,10 @@ class LibraryView extends ConsumerWidget {
                       ctrl.createPlaylist(
                         name: name,
                         description: descCtrl.text.trim().isEmpty
-                            ? 'Playlist kustom Hi-Res'
+                            ? 'Playlist kustom'
                             : descCtrl.text.trim(),
                         isCollaborative: collaborative,
-                        tracks: seedTracks.take(6).toList(),
+                        tracks: const [],
                       );
                     }
                     Navigator.of(ctx).pop();
@@ -488,55 +453,6 @@ class LibraryView extends ConsumerWidget {
               ],
             );
           },
-        );
-      },
-    );
-  }
-
-  void _showCreateBlendDialog(
-    BuildContext context,
-    LibraryController ctrl,
-    List<TrackModel> seedTracks,
-  ) {
-    final friendCtrl = TextEditingController();
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Buat Blend Selera Musik Bersama Teman'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Gabungkan selera dengar Anda dengan teman dan lihat skor kecocokan musik secara instan:',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: friendCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Teman',
-                  hintText: 'Masukkan nama teman untuk digabungkan',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final friend = friendCtrl.text.trim();
-                if (friend.isNotEmpty) {
-                  ctrl.createBlendWithFriend(friend, seedTracks.take(8).toList());
-                }
-                Navigator.of(ctx).pop();
-              },
-              child: const Text('Buat Blend Sekarang'),
-            ),
-          ],
         );
       },
     );

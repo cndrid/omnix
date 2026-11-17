@@ -9,7 +9,6 @@ import 'library_view.dart';
 import 'profile_view.dart';
 import 'search_view.dart';
 import 'widgets/liquid_glass_box.dart';
-import 'widgets/queue_sheet.dart';
 import 'widgets/sticky_mini_player.dart';
 
 class OmniXAppShell extends ConsumerWidget {
@@ -20,9 +19,7 @@ class OmniXAppShell extends ConsumerWidget {
     final activeTab = ref.watch(activeTabProvider);
     final railCollapsed = ref.watch(railCollapsedProvider);
     final themeMode = ref.watch(themeModeProvider);
-    final reducedTransparency = ref.watch(reducedTransparencyProvider);
     final playerState = ref.watch(playerControllerProvider);
-    final engineState = ref.watch(audioEngineProvider);
     final controller = ref.read(playerControllerProvider.notifier);
 
     final width = MediaQuery.sizeOf(context).width;
@@ -30,8 +27,9 @@ class OmniXAppShell extends ConsumerWidget {
     final isDesktop = width >= OmniXTokens.breakpointDesktop;
     final hasActiveTrack = playerState.currentTrack != null;
 
+    // Mini player ramping (~56) + navbar pill (~64) + jarak: 160.
     final bottomSafePadding = hasActiveTrack
-        ? (isMobile ? 184.0 : 116.0)
+        ? (isMobile ? 160.0 : 116.0)
         : (isMobile ? 104.0 : 32.0);
 
     final pages = [
@@ -111,58 +109,10 @@ class OmniXAppShell extends ConsumerWidget {
                     ),
                   ],
                 ),
+                // AppBar ramping: logo + judul + ganti tema saja.
+                // Antrean ada di mini player & pemutar; toggle kaca ada
+                // di Profil; Sesi Jam dihapus (butuh server).
                 actions: [
-                  TextButton.icon(
-                    onPressed: () => showQueueManagerSheet(context, ref),
-                    icon: const Icon(Icons.queue_music_rounded, size: 19),
-                    label: Text(
-                      'Antrean (${playerState.queue.length})',
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  if (engineState.jamSessionActive && !isMobile)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: scheme.secondary.withValues(alpha: 0.2),
-                          borderRadius:
-                              BorderRadius.circular(OmniXTokens.radiusPill),
-                          border: Border.all(color: scheme.secondary),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          'JAM: ${engineState.jamCode}',
-                          style: TextStyle(
-                            color: scheme.secondary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
-                  IconButton(
-                    tooltip: reducedTransparency
-                        ? 'Aktifkan efek kaca transparan (Liquid Glass)'
-                        : 'Nonaktifkan transparansi kaca (Kontras Solid)',
-                    onPressed: () {
-                      ref.read(reducedTransparencyProvider.notifier).state =
-                          !reducedTransparency;
-                    },
-                    icon: Icon(
-                      reducedTransparency
-                          ? Icons.blur_off_rounded
-                          : Icons.blur_on_rounded,
-                    ),
-                  ),
                   IconButton(
                     tooltip: themeMode == ThemeMode.dark
                         ? 'Beralih ke Mode Terang'

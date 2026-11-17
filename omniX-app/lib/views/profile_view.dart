@@ -12,20 +12,6 @@ class ProfileView extends ConsumerWidget {
     required this.bottomSafePadding,
   });
 
-  static const List<String> _qualities = [
-    'Lossless FLAC 24-bit / 96kHz',
-    'Sangat Tinggi (320 kbps)',
-    'Hemat Data (AAC 128 kbps)',
-  ];
-
-  static const List<String> _devices = [
-    'AirPods Pro (Spatial 3D)',
-    'External USB DAC (Bit-Perfect 24-bit/96kHz)',
-    'Speaker Sistem Studio',
-    'Living Room Smart TV (OmniX Connect)',
-    'Mobil (Android Auto / CarPlay)',
-  ];
-
   static const List<String> _eqPresets = [
     'Spatial 3D',
     'Flat',
@@ -148,7 +134,7 @@ class ProfileView extends ConsumerWidget {
         ),
         const SizedBox(height: 24),
         Text(
-          'Koneksi Backend Python (FastAPI)',
+          'Mode Client-Side (Tanpa Server)',
           style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: 12),
@@ -161,43 +147,30 @@ class ProfileView extends ConsumerWidget {
           ),
           child: Row(
             children: [
-              Icon(Icons.dns_rounded, color: scheme.primary, size: 28),
+              Icon(Icons.phone_android_rounded, color: scheme.primary, size: 28),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'FastAPI + ytmusicapi + yt-dlp',
+                      'Langsung dari HP',
                       style: theme.textTheme.titleMedium,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'URL Server: ${ref.watch(backendBaseUrlProvider)}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Backend menangani pencarian lagu, metadata, lirik sinkron, dan resolusi stream video klip.',
-                      style: theme.textTheme.bodySmall,
+                      'Pencarian, metadata, lirik, dan stream diambil langsung dari perangkat — tidak ada server di tengah jalan.',
+                      style: theme.textTheme.bodyMedium,
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: () => _showBackendUrlDialog(context, ref),
-                child: const Text('Ganti URL'),
               ),
             ],
           ),
         ),
         const SizedBox(height: 24),
         Text(
-          'Mesin Audio & Kualitas Streaming (Lossless)',
+          'Mesin Audio',
           style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: 12),
@@ -211,21 +184,6 @@ class ProfileView extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Kualitas Audio & Unduhan', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final q in _qualities)
-                    ChoiceChip(
-                      label: Text(q),
-                      selected: engine.audioQuality == q,
-                      onSelected: (_) => engineCtrl.setQuality(q),
-                    ),
-                ],
-              ),
-              const Divider(height: 28),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Gapless Playback (0ms Transisi Mulus)'),
@@ -337,71 +295,7 @@ class ProfileView extends ConsumerWidget {
         ),
         const SizedBox(height: 24),
         Text(
-          'OmniX Connect, DAC & Sesi Jam Bersama',
-          style: theme.textTheme.titleLarge,
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: BorderRadius.circular(OmniXTokens.radiusCard),
-            border: Border.all(color: scheme.outline),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Perangkat Output Aktif',
-                style: theme.textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              for (final dev in _devices)
-                RadioListTile<String>(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(dev),
-                  value: dev,
-                  groupValue: engine.activeDeviceName,
-                  onChanged: (val) {
-                    if (val != null) engineCtrl.selectDevice(val);
-                  },
-                ),
-              const Divider(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Sesi Jam Real-Time (${engine.jamCode})',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          engine.jamSessionActive
-                              ? 'Sesi Jam sedang aktif. Bagikan kode ${engine.jamCode} ke teman.'
-                              : 'Mulai sesi dengar bersama teman secara real-time tanpa batasan paket.',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-                  FilledButton(
-                    onPressed: engineCtrl.toggleJamSession,
-                    child: Text(
-                      engine.jamSessionActive ? 'Akhiri Jam' : 'Mulai Jam',
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        Text(
-          'Privasi, Taste Profile & Tampilan Liquid Glass',
+          'Privasi & Tampilan',
           style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: 12),
@@ -416,9 +310,9 @@ class ProfileView extends ConsumerWidget {
             children: [
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Mode Transparansi Kaca (Liquid Glass 24px)'),
+                title: const Text('Mode Transparansi Kaca (Liquid Glass)'),
                 subtitle: const Text(
-                  'Matikan untuk beralih ke permukaan solid #16161D (Mode Hemat Daya / Kontras Tinggi)',
+                  'Matikan untuk beralih ke permukaan solid (Mode Kontras Tinggi)',
                 ),
                 value: !reducedTransparency,
                 onChanged: (enableGlass) {
@@ -428,7 +322,7 @@ class ProfileView extends ConsumerWidget {
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Tema OLED Dark (#0B0B10)'),
+                title: const Text('Tema Gelap'),
                 subtitle: const Text(
                   'Gunakan latar gelap pekat khas OmniX',
                 ),
@@ -449,30 +343,12 @@ class ProfileView extends ConsumerWidget {
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Tampilkan Aktivitas Teman (Friend Activity)'),
-                subtitle: const Text(
-                  'Lihat musik yang sedang didengarkan teman secara langsung',
-                ),
-                value: engine.showFriendActivity,
-                onChanged: engineCtrl.toggleFriendActivity,
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
                 title: const Text('Izinkan Konten Eksplisit'),
                 subtitle: const Text(
-                  'Putar lagu dan episode podcast dengan tanda eksplisit',
+                  'Putar lagu dengan tanda eksplisit',
                 ),
                 value: engine.explicitContentAllowed,
                 onChanged: engineCtrl.toggleExplicitContent,
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Kecualikan Sesi Ini dari Taste Profile'),
-                subtitle: const Text(
-                  'Jangan gunakan pemutaran saat ini untuk memengaruhi Discover Weekly',
-                ),
-                value: engine.excludeFromTasteProfile,
-                onChanged: engineCtrl.toggleExcludeTaste,
               ),
             ],
           ),
@@ -528,77 +404,6 @@ class ProfileView extends ConsumerWidget {
                 Navigator.of(ctx).pop();
               },
               child: const Text('Simpan'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showBackendUrlDialog(BuildContext context, WidgetRef ref) {
-    final currentUrl = ref.read(backendBaseUrlProvider);
-    final ctrl = TextEditingController(text: currentUrl);
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Konfigurasi URL Backend Python'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Aplikasi terhubung ke backend FastAPI untuk mengambil data YouTube Music & streaming.',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ctrl,
-                decoration: const InputDecoration(
-                  labelText: 'Alamat Host / URL Backend',
-                  hintText: 'http://127.0.0.1:8000',
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  ActionChip(
-                    label: const Text('Localhost (127.0.0.1)'),
-                    onPressed: () {
-                      ctrl.text = 'http://127.0.0.1:8000';
-                    },
-                  ),
-                  ActionChip(
-                    label: const Text('Android Emulator (10.0.2.2)'),
-                    onPressed: () {
-                      ctrl.text = 'http://10.0.2.2:8000';
-                    },
-                  ),
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final text = ctrl.text.trim();
-                if (text.isNotEmpty) {
-                  ref.read(backendBaseUrlProvider.notifier).state = text;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('URL backend diperbarui ke: $text'),
-                    ),
-                  );
-                }
-                Navigator.of(ctx).pop();
-              },
-              child: const Text('Terapkan'),
             ),
           ],
         );

@@ -29,6 +29,19 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
     return '$minutes:$seconds';
   }
 
+  /// Angka ringkas ala Indonesia: 47.174.483 -> "47 jt", 1.325.532 -> "1,3 jt".
+  String _formatCount(int n) {
+    if (n >= 1000000) {
+      final v = n / 1000000;
+      final s = v >= 10
+          ? v.toStringAsFixed(0)
+          : v.toStringAsFixed(1).replaceAll('.', ',');
+      return '$s jt';
+    }
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)} rb';
+    return '$n';
+  }
+
   @override
   Widget build(BuildContext context) {
     final playerState = ref.watch(playerControllerProvider);
@@ -344,7 +357,7 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
   ) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final formatLabel = detail?.streamFormatLabel ?? 'FLAC 24-bit / 96kHz';
+    final formatLabel = detail?.streamFormatLabel ?? 'Audio';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -418,6 +431,36 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
           ),
           textAlign: TextAlign.center,
         ),
+        if (detail?.likes != null && detail!.likes! > 0) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.thumb_up_alt_outlined,
+                size: 15,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _formatCount(detail.likes!),
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(width: 14),
+              Icon(
+                Icons.thumb_down_alt_outlined,
+                size: 15,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _formatCount(detail.dislikes ?? 0),
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ],
         if (playerState.errorMessage != null) ...[
           const SizedBox(height: 12),
           Container(
@@ -425,15 +468,15 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
             decoration: BoxDecoration(
               color: scheme.surface,
               borderRadius: BorderRadius.circular(OmniXTokens.radiusInput),
-              border: Border.all(color: scheme.error),
+              border: Border.all(color: scheme.outline),
             ),
             child: Row(
               children: [
-                Icon(Icons.error_outline, color: scheme.error),
+                Icon(Icons.cloud_off_rounded, color: scheme.onSurfaceVariant),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    playerState.errorMessage!,
+                    'Koneksi bermasalah. ${playerState.errorMessage!}',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: scheme.onSurface,
                     ),
@@ -457,10 +500,10 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
           value: _formatDuration(playerState.position),
           child: SliderTheme(
             data: SliderTheme.of(context).copyWith(
-              activeTrackColor: scheme.primary,
+              activeTrackColor: scheme.secondary,
               inactiveTrackColor: scheme.outline,
-              thumbColor: scheme.primary,
-              overlayColor: scheme.primary.withValues(alpha: 0.18),
+              thumbColor: scheme.secondary,
+              overlayColor: scheme.secondary.withValues(alpha: 0.18),
             ),
             child: Slider(
               value: playerState.position.inSeconds
@@ -570,6 +613,8 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
                 style: FilledButton.styleFrom(
                   shape: const CircleBorder(),
                   padding: EdgeInsets.zero,
+                  backgroundColor: scheme.secondary,
+                  foregroundColor: scheme.onSecondary,
                 ),
                 onPressed:
                     playerState.isLoadingTrack ? null : controller.togglePlayPause,
@@ -579,7 +624,7 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
                         height: 28,
                         child: CircularProgressIndicator(
                           strokeWidth: 2.5,
-                          color: scheme.onPrimary,
+                          color: scheme.onSecondary,
                         ),
                       )
                     : Icon(
@@ -594,7 +639,7 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
             ),
             const SizedBox(width: 14),
             IconButton(
-              tooltip: 'Lagu berikutnya (Skip Tanpa Batas)',
+              tooltip: 'Lagu berikutnya',
               onPressed: controller.skipNext,
               icon: Icon(
                 Icons.skip_next_rounded,
@@ -650,7 +695,7 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
                 size: 18,
                 color: isDownloaded ? scheme.secondary : scheme.onSurface,
               ),
-              label: Text(isDownloaded ? 'Tersimpan Offline' : 'Unduh FLAC'),
+              label: Text(isDownloaded ? 'Tersimpan Offline' : 'Unduh'),
             ),
             OutlinedButton.icon(
               onPressed: () => _showOutputSelectorSheet(context),
@@ -979,12 +1024,8 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
   void _showOutputSelectorSheet(BuildContext context) {
     final engine = ref.read(audioEngineProvider);
     final engineCtrl = ref.read(audioEngineProvider.notifier);
-    const devices = [
-      'AirPods Pro (Spatial 3D)',
-      'External USB DAC (Bit-Perfect 24-bit/96kHz)',
-      'Speaker Sistem Studio',
-      'Living Room Smart TV (OmniX Connect)',
-    ];
+    // Audio keluar lewat perangkat ini — tidak ada perangkat lain.
+    const devices = ['Perangkat ini'];
 
     showModalBottomSheet<void>(
       context: context,
@@ -996,7 +1037,7 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Pilih Output Audio & OmniX Connect',
+                'Output Audio',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 12),
