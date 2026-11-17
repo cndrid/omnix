@@ -99,7 +99,7 @@ class SongCreditsModel {
     this.writers = const [],
     this.producers = const [],
     this.releaseYear,
-    this.label = 'YouTube Music / OmniX Lossless 24-bit',
+    this.label = 'YouTube Music',
     this.artistBio,
     this.upcomingConcerts = const [],
   });
@@ -113,7 +113,7 @@ class SongCreditsModel {
           .map((e) => e.toString())
           .toList(),
       releaseYear: json['release_year'] as String?,
-      label: (json['label'] as String?) ?? 'OmniX Lossless 24-bit',
+      label: (json['label'] as String?) ?? 'YouTube Music',
       artistBio: json['artist_bio'] as String?,
       upcomingConcerts:
           ((json['upcoming_concerts'] as List<dynamic>?) ?? const [])
@@ -134,6 +134,8 @@ class TrackModel {
   final bool isExplicit;
   final String resultType;
   final String category;
+  /// Label format asli stream (mis. "AAC · 128 kbps"). Kosong kalau belum
+  /// diketahui — view menyembunyikan badge kalau kosong.
   final String audioQualityBadge;
 
   const TrackModel({
@@ -147,7 +149,7 @@ class TrackModel {
     this.isExplicit = false,
     this.resultType = 'song',
     this.category = 'music',
-    this.audioQualityBadge = 'FLAC 24-bit',
+    this.audioQualityBadge = '',
   });
 
   String get artistLine {
@@ -201,8 +203,7 @@ class TrackModel {
       isExplicit: (json['is_explicit'] as bool?) ?? false,
       resultType: (json['result_type'] as String?) ?? 'song',
       category: (json['category'] as String?) ?? 'music',
-      audioQualityBadge:
-          (json['audio_quality_badge'] as String?) ?? 'FLAC 24-bit',
+      audioQualityBadge: (json['audio_quality_badge'] as String?) ?? '',
     );
   }
 }
@@ -226,6 +227,9 @@ class SongDetailModel {
   final String? transcript;
   final SongCreditsModel credits;
   final List<TrackModel> relatedTracks;
+  /// Rasio suka/tidak suka dari Return YouTube Dislike (opsional).
+  final int? likes;
+  final int? dislikes;
 
   const SongDetailModel({
     required this.videoId,
@@ -246,17 +250,61 @@ class SongDetailModel {
     this.transcript,
     this.credits = const SongCreditsModel(),
     this.relatedTracks = const [],
+    this.likes,
+    this.dislikes,
   });
 
+  /// Label format sesuai stream asli (AAC/Opus + bitrate nyata).
+  /// Bukan lagi klaim "FLAC 24-bit" — stream YouTube itu m4a/opus.
   String get streamFormatLabel {
-    if (audioMimeType == null && audioBitrateKbps == null) {
-      return 'FLAC 24-bit / 96kHz';
-    }
-    final codec = (audioMimeType ?? 'FLAC').toUpperCase();
+    final mime = (audioMimeType ?? '').toLowerCase();
+    final codec = mime.contains('webm')
+        ? 'Opus'
+        : mime.contains('mp4')
+            ? 'AAC'
+            : null;
+    if (codec == null) return 'Audio';
     if (audioBitrateKbps != null && audioBitrateKbps! > 0) {
-      return 'FLAC 24-bit · $codec ${audioBitrateKbps}kbps';
+      return '$codec · ${audioBitrateKbps}kbps';
     }
-    return 'FLAC 24-bit · $codec';
+    return codec;
+  }
+
+  SongDetailModel copyWith({
+    String? audioStreamUrl,
+    String? audioMimeType,
+    int? audioBitrateKbps,
+    String? videoStreamUrl,
+    String? canvasLoopUrl,
+    String? lyrics,
+    bool? hasSyncedLyrics,
+    List<LyricLineModel>? syncedLyrics,
+    List<TrackModel>? relatedTracks,
+    int? likes,
+    int? dislikes,
+  }) {
+    return SongDetailModel(
+      videoId: videoId,
+      title: title,
+      artists: artists,
+      album: album,
+      lengthSeconds: lengthSeconds,
+      thumbnails: thumbnails,
+      audioStreamUrl: audioStreamUrl ?? this.audioStreamUrl,
+      audioMimeType: audioMimeType ?? this.audioMimeType,
+      audioBitrateKbps: audioBitrateKbps ?? this.audioBitrateKbps,
+      videoStreamUrl: videoStreamUrl ?? this.videoStreamUrl,
+      canvasLoopUrl: canvasLoopUrl ?? this.canvasLoopUrl,
+      lyrics: lyrics ?? this.lyrics,
+      hasSyncedLyrics: hasSyncedLyrics ?? this.hasSyncedLyrics,
+      syncedLyrics: syncedLyrics ?? this.syncedLyrics,
+      chapters: chapters,
+      transcript: transcript,
+      credits: credits,
+      relatedTracks: relatedTracks ?? this.relatedTracks,
+      likes: likes ?? this.likes,
+      dislikes: dislikes ?? this.dislikes,
+    );
   }
 
   factory SongDetailModel.fromJson(Map<String, dynamic> json) {
@@ -304,6 +352,8 @@ class SongDetailModel {
           .whereType<Map<String, dynamic>>()
           .map(TrackModel.fromJson)
           .toList(),
+      likes: (json['likes'] as num?)?.toInt(),
+      dislikes: (json['dislikes'] as num?)?.toInt(),
     );
   }
 }
