@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart';
 import '../models/track_model.dart';
 import '../services/api_service.dart';
 import '../services/audio_handler_service.dart';
+import '../services/skip_service.dart';
 import '../services/stream_extractor.dart';
 
 enum AppTab { beranda, cari, koleksi, profil }
@@ -79,7 +80,7 @@ class AudioEngineSettingsState {
   const AudioEngineSettingsState({
     this.userDisplayName,
     this.userBio,
-    this.audioQuality = 'Lossless FLAC 24-bit / 96kHz',
+    this.audioQuality = 'Standar',
     this.gaplessPlayback = true,
     this.crossfadeSeconds = 4.0,
     this.automix = true,
@@ -89,7 +90,7 @@ class AudioEngineSettingsState {
     this.showFriendActivity = true,
     this.explicitContentAllowed = true,
     this.excludeFromTasteProfile = false,
-    this.activeDeviceName = 'AirPods Pro (Spatial 3D)',
+    this.activeDeviceName = 'Perangkat ini',
     this.equalizerPreset = 'Spatial 3D',
     this.eqBands = const [2.5, 1.5, 0.5, 2.0, 3.5],
     this.jamSessionActive = false,
@@ -222,7 +223,6 @@ class LibraryState {
   final List<TrackModel> likedTracks;
   final List<TrackModel> recentTracks;
   final List<TrackModel> offlineDownloadedTracks;
-  final List<TrackModel> localFolderTracks;
   final List<UserPlaylistModel> playlists;
   final LibrarySortMode sortMode;
   final String activeCategoryChip;
@@ -231,22 +231,7 @@ class LibraryState {
     this.likedTracks = const [],
     this.recentTracks = const [],
     this.offlineDownloadedTracks = const [],
-    this.localFolderTracks = const [],
-    this.playlists = const [
-      UserPlaylistModel(
-        id: 'pl_lofi_senja',
-        name: 'Lofi Senja & Hujan Tropis',
-        description: 'Kurasi fokus kerja malam dalam format Lossless FLAC 24-bit.',
-        isPinned: true,
-        isOfflineSynced: true,
-      ),
-      UserPlaylistModel(
-        id: 'pl_discover_weekly',
-        name: 'Discover Weekly',
-        description: 'Rekomendasi personal mingguan tanpa batas dan bebas iklan.',
-        isPinned: true,
-      ),
-    ],
+    this.playlists = const [],
     this.sortMode = LibrarySortMode.recentPlayed,
     this.activeCategoryChip = 'Semua',
   });
@@ -268,7 +253,6 @@ class LibraryState {
     List<TrackModel>? likedTracks,
     List<TrackModel>? recentTracks,
     List<TrackModel>? offlineDownloadedTracks,
-    List<TrackModel>? localFolderTracks,
     List<UserPlaylistModel>? playlists,
     LibrarySortMode? sortMode,
     String? activeCategoryChip,
@@ -278,7 +262,6 @@ class LibraryState {
       recentTracks: recentTracks ?? this.recentTracks,
       offlineDownloadedTracks:
           offlineDownloadedTracks ?? this.offlineDownloadedTracks,
-      localFolderTracks: localFolderTracks ?? this.localFolderTracks,
       playlists: playlists ?? this.playlists,
       sortMode: sortMode ?? this.sortMode,
       activeCategoryChip: activeCategoryChip ?? this.activeCategoryChip,
@@ -390,23 +373,6 @@ class LibraryController extends StateNotifier<LibraryState> {
     state = state.copyWith(
       playlists: state.playlists.where((p) => p.id != playlistId).toList(),
     );
-  }
-
-  void indexSampleLocalFolder(List<TrackModel> seedTracks) {
-    final localItems = seedTracks.take(4).map((t) {
-      return TrackModel(
-        videoId: t.videoId,
-        title: '${t.title} (Local Master.flac)',
-        artists: t.artists,
-        album: t.album,
-        duration: t.duration,
-        durationSeconds: t.durationSeconds,
-        thumbnails: t.thumbnails,
-        category: 'local',
-        audioQualityBadge: 'FLAC 24-bit Local',
-      );
-    }).toList();
-    state = state.copyWith(localFolderTracks: localItems);
   }
 }
 
@@ -619,18 +585,34 @@ class PlayerController extends StateNotifier<PlayerViewState> {
 
       // Ekstraksi stream di HP (IP pengguna tidak diblokir YouTube).
       // Coba kandidat satu per satu: kalau URL pertama gagal dimuat
-      // (mis. format ditolak player), coba format berikutnya, terakhir
-      // URL dari backend.
-      final candidates = await StreamExtractor.extractAudioUrls(track.videoId);
-      if (detail.audioStreamUrl != null &&
-          detail.audioStreamUrl!.isNotEmpty) {
-        candidates.add(detail.audioStreamUrl!);
+      // (mis. format ditolak player), coba format berikutnya.
+      // Sekalian ambil info format asli + segmen sponsor (opsional,
+      // gagal mengambilnya tidak menggagalkan pemutaran).
+      final extraction = await Future.wait([
+        StreamExtractor.extractAudioUrls(track.videoId),
+        StreamExtractor.extractBestAudioInfo(track.videoId),
+        _api.getSkipSegments(track.videoId),
+      ]);
+      final candidates = (extraction[0] as List<String>).toList();
+      final bestInfo = extraction[1] as AudioCandidate?;
+      final skipSegments = extraction[2] as List<SkipSegment>;
+      if (bestInfo != null) {
+        state = state.copyWith(
+          songDetail: detail.copyWith(
+            audioMimeType: bestInfo.mimeType,
+            audioBitrateKbps: bestInfo.bitrateKbps,
+          ),
+        );
       }
       String? lastError;
       var played = false;
       for (final url in candidates) {
         try {
-          await _audioHandler.loadAndPlay(track: track, streamUrl: url);
+          await _audioHandler.loadAndPlay(
+            track: track,
+            streamUrl: url,
+            skipSegments: skipSegments,
+          );
           played = true;
           break;
         } catch (e) {
