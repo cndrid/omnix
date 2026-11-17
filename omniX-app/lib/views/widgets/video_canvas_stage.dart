@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../../models/track_model.dart';
 import '../../providers/app_providers.dart';
+import '../../services/stream_extractor.dart';
 import '../../theme/omnix_theme.dart';
 import 'liquid_glass_box.dart';
 import 'track_artwork.dart';
@@ -99,7 +100,13 @@ class _VideoCanvasStageState extends State<VideoCanvasStage>
       return;
     }
 
-    final streamUrl = _buildStreamUrl();
+    // Ekstraksi video di HP dulu (IP pengguna tidak diblokir YouTube);
+    // URL dari backend dipakai sebagai fallback kalau ekstraksi gagal.
+    final localUrl =
+        await StreamExtractor.extractVideoUrl(widget.track.videoId);
+    final streamUrl = (localUrl != null && localUrl.isNotEmpty)
+        ? localUrl
+        : _buildStreamUrl();
     if (streamUrl == null || streamUrl.isEmpty) {
       setState(() {
         _isVideoLoading = false;
