@@ -32,6 +32,10 @@ final apiServiceProvider = Provider<OmniXApiService>((ref) {
   return service;
 });
 
+// Instance handler berasal dari AudioService.init di main.dart dan
+// disuntikkan lewat ProviderScope override, supaya handler yang dipakai
+// UI sama dengan yang terdaftar di media session. Buat instance baru
+// di sini hanya kalau aplikasi dijalankan tanpa melewati main.dart.
 final audioHandlerProvider = Provider<OmniXAudioHandler>((ref) {
   final handler = OmniXAudioHandler();
   ref.onDispose(handler.dispose);
@@ -495,6 +499,11 @@ class PlayerController extends StateNotifier<PlayerViewState> {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _sleepTimer;
 
+  /// Generasi selectTrack: naik tiap kali lagu baru dipilih. Dipakai
+  /// supaya selectTrack lama (ekstraksi/detail yang masih jalan di
+  /// background) tidak menimpa state milik lagu yang baru dipilih.
+  int _selectGeneration = 0;
+
   PlayerController({
     required OmniXApiService api,
     required OmniXAudioHandler audioHandler,
@@ -504,6 +513,18 @@ class PlayerController extends StateNotifier<PlayerViewState> {
         _library = library,
         super(const PlayerViewState()) {
     _bindStreams();
+    // Auto-recovery dari handler (18 Nov 2026): selama recovery, tombol
+    // play nonaktif + spinner tampil (sama seperti saat lagu baru dimuat);
+    // kartu error netral + tombol Coba Lagi baru muncul kalau 3x gagal.
+    _audioHandler.onRecoveryStateChanged = (recovering) {
+      state = state.copyWith(isLoadingTrack: recovering);
+    };
+    _audioHandler.onRecoveryFailed = (message) {
+      state = state.copyWith(
+        isLoadingTrack: false,
+        errorMessage: message,
+      );
+    };
   }
 
   String get backendBaseUrl => _api.baseUrl;
@@ -548,6 +569,7 @@ class PlayerController extends StateNotifier<PlayerViewState> {
     String? djCommentary,
   }) async {
     _library.recordRecent(track);
+    final generation = ++_selectGeneration;
 
     final initialQueue = customQueue ?? [track];
     final idx = initialQueue.indexWhere((t) => t.videoId == track.videoId);
@@ -568,69 +590,165 @@ class PlayerController extends StateNotifier<PlayerViewState> {
       isFullscreenOpen: openFullscreen ? true : state.isFullscreenOpen,
     );
 
+    // Fast start (18 Nov 2026): ekstraksi stream + detail lagu jalan
+    // BERSAMAAN, dan lagu mulai diputar begitu kandidat stream didapat —
+    // detail (termasuk lirik LRCLIB + vote RYD) TIDAK LAGI ditunggu sebelum
+    // putar. Dulu dua jaringan ini berurutan, jadi ketukan pertama lambat.
+    // Detail dilampirkan menyusul lewat _attachDetail.
+    final detailFuture = _api.getSongDetail(track.videoId);
+
     try {
-      final detail = await _api.getSongDetail(track.videoId);
-      final updatedQueue = customQueue != null
-          ? initialQueue
-          : [track, ...detail.relatedTracks];
-
-      state = state.copyWith(
-        songDetail: detail,
-        queue: updatedQueue,
-        duration: detail.lengthSeconds > 0
-            ? Duration(seconds: detail.lengthSeconds)
-            : state.duration,
-        isLoadingTrack: false,
-      );
-
-      // Ekstraksi stream di HP (IP pengguna tidak diblokir YouTube).
-      // Coba kandidat satu per satu: kalau URL pertama gagal dimuat
-      // (mis. format ditolak player), coba format berikutnya.
-      // Sekalian ambil info format asli + segmen sponsor (opsional,
-      // gagal mengambilnya tidak menggagalkan pemutaran).
-      final extraction = await Future.wait([
-        StreamExtractor.extractAudioUrls(track.videoId),
-        StreamExtractor.extractBestAudioInfo(track.videoId),
-        _api.getSkipSegments(track.videoId),
+      // Ekstraksi + segmen sponsor bersamaan; satu kali getManifest untuk
+      // URL dan info format (lihat StreamExtractor.extractAudioCandidates).
+      final results = await Future.wait([
+        StreamExtractor.extractAudioCandidates(track.videoId),
+        _api.getSkipSegments(track.videoId).catchError(
+              (_) => <SkipSegment>[],
+            ),
       ]);
-      final candidates = (extraction[0] as List<String>).toList();
-      final bestInfo = extraction[1] as AudioCandidate?;
-      final skipSegments = extraction[2] as List<SkipSegment>;
-      if (bestInfo != null) {
-        state = state.copyWith(
-          songDetail: detail.copyWith(
-            audioMimeType: bestInfo.mimeType,
-            audioBitrateKbps: bestInfo.bitrateKbps,
-          ),
-        );
-      }
+      // Lagu lain sudah dipilih selama menunggu: serahkan state ke
+      // selectTrack yang baru, jangan sentuh apa pun lagi.
+      if (generation != _selectGeneration) return;
+      final candidates = (results[0] as List<AudioCandidate>).toList();
+      final skipSegments = results[1] as List<SkipSegment>;
+      final bestInfo = candidates.isEmpty ? null : candidates.first;
+
+      // Coba kandidat satu per satu: kalau URL pertama gagal dimuat
+      // (mis. format ditolak player, atau play() timeout karena audio
+      // focus ditolak), coba format berikutnya — bukan langsung error.
       String? lastError;
       var played = false;
-      for (final url in candidates) {
+      for (final candidate in candidates) {
+        if (generation != _selectGeneration) return;
         try {
           await _audioHandler.loadAndPlay(
             track: track,
-            streamUrl: url,
+            streamUrl: candidate.url,
             skipSegments: skipSegments,
           );
           played = true;
           break;
         } catch (e) {
+          if (generation != _selectGeneration) return;
           lastError = e.toString();
         }
       }
+      if (generation != _selectGeneration) return;
       if (!played) {
         state = state.copyWith(
+          isLoadingTrack: false,
           errorMessage: lastError ??
               'Stream audio langsung tidak tersedia untuk lagu ini.',
         );
+        // Detail tetap dilampirkan menyusul (tidak menghalangi error).
+        unawaited(_attachDetail(
+          detailFuture,
+          track,
+          customQueue,
+          generation,
+          bestInfo,
+        ));
+        return;
       }
+
+      // Perbaikan bug klik play 2x (18 Nov 2026, item A): isLoadingTrack
+      // baru false DI SINI — setelah loadAndPlay berhasil — bukan setelah
+      // getSongDetail. Selama ekstraksi + load, tombol play tetap nonaktif
+      // sehingga ketukan play dini tidak bisa membuat flag playing basi.
+      state = state.copyWith(isLoadingTrack: false);
+      // Prefetch lagu berikutnya di background supaya pencet next langsung
+      // jalan (cache memori StreamExtractor sudah hangat).
+      _prefetchNext();
+      unawaited(_attachDetail(
+        detailFuture,
+        track,
+        customQueue,
+        generation,
+        bestInfo,
+      ));
     } catch (e) {
+      // Jalur keluar darurat: kembalikan isLoadingTrack ke false + isi
+      // error, supaya UI tidak macet di spinner tanpa pesan apa pun.
+      if (generation != _selectGeneration) return;
       state = state.copyWith(
         isLoadingTrack: false,
         errorMessage: e.toString(),
       );
     }
+  }
+
+  /// Detail lagu (judul lengkap, lirik, vote, lagu terkait) dilampirkan
+  /// MENYUSUL setelah lagu mulai bunyi — tidak menghalangi putar (fast
+  /// start, 18 Nov 2026). Kalau pengguna sudah pindah lagu lain, hasilnya
+  /// dibuang. Kalau detail gagal, lagu yang sudah bunyi tetap jalan —
+  /// tampilan memakai data dasar dari TrackModel.
+  Future<void> _attachDetail(
+    Future<SongDetailModel> detailFuture,
+    TrackModel track,
+    List<TrackModel>? customQueue,
+    int generation,
+    AudioCandidate? bestInfo,
+  ) async {
+    SongDetailModel detail;
+    try {
+      detail = await detailFuture;
+    } catch (_) {
+      return;
+    }
+    if (generation != _selectGeneration) return;
+    if (state.currentTrack?.videoId != track.videoId) return;
+    final enriched = bestInfo == null
+        ? detail
+        : detail.copyWith(
+            audioMimeType: bestInfo.mimeType,
+            audioBitrateKbps: bestInfo.bitrateKbps,
+          );
+    if (customQueue == null && detail.relatedTracks.isNotEmpty) {
+      final updatedQueue = [
+        track,
+        ...detail.relatedTracks.where(
+          (t) => t.videoId != track.videoId,
+        ),
+      ];
+      state = state.copyWith(
+        songDetail: enriched,
+        queue: updatedQueue,
+        duration: detail.lengthSeconds > 0
+            ? Duration(seconds: detail.lengthSeconds)
+            : state.duration,
+      );
+    } else {
+      state = state.copyWith(
+        songDetail: enriched,
+        duration: detail.lengthSeconds > 0
+            ? Duration(seconds: detail.lengthSeconds)
+            : state.duration,
+      );
+    }
+  }
+
+  /// Prefetch lagu berikutnya (18 Nov 2026): saat lagu sekarang mulai
+  /// diputar, resolve link lagu berikutnya di background supaya pencet
+  /// next langsung jalan — hasilnya tersimpan di cache memori
+  /// StreamExtractor (TTL ~6 jam), jadi selectTrack berikutnya tidak
+  /// ekstraksi ulang. Gagal prefetch tidak apa-apa (diabaikan diam-diam);
+  /// selectTrack berikutnya akan ekstraksi seperti biasa.
+  void _prefetchNext() {
+    if (state.queue.isEmpty) return;
+    var nextIndex = state.currentIndex + 1;
+    if (nextIndex >= state.queue.length) {
+      // Antrean habis tapi mode ulang-semua: siapkan lagu pertama lagi.
+      if (state.loopMode != LoopMode.all) return;
+      nextIndex = 0;
+    }
+    final next = state.queue[nextIndex];
+    if (next.videoId.isEmpty) return;
+    if (next.videoId == state.currentTrack?.videoId) return;
+    unawaited(
+      StreamExtractor.extractAudioCandidates(next.videoId).catchError(
+            (_) => <AudioCandidate>[],
+          ),
+    );
   }
 
   Future<void> startAiDj({String mood = 'Lofi Fokus & Energi Malam'}) async {
@@ -876,6 +994,10 @@ class PlayerController extends StateNotifier<PlayerViewState> {
     for (final sub in _subscriptions) {
       sub.cancel();
     }
+    // Jangan biarkan handler memanggil controller yang sudah di-dispose
+    // (mis. recovery yang selesai belakangan).
+    _audioHandler.onRecoveryStateChanged = null;
+    _audioHandler.onRecoveryFailed = null;
     super.dispose();
   }
 }
