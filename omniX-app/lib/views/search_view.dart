@@ -144,8 +144,11 @@ class _SearchViewState extends ConsumerState<SearchView> {
               onSubmitted: _submitImmediate,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                labelText: 'Lagu, artis, atau playlist...',
-                hintText: 'Ketik kata kunci atau pilih tag populer di bawah',
+                // Hanya hintText: labelText + hintText dirender berdua di
+                // kolom kosong sehingga teksnya tumpang tindih (bug 5).
+                // Placeholder sesuai preview v2; label aksesibilitas
+                // tetap ada di Semantics di atas.
+                hintText: 'Lagu, artis, atau playlist...',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: query.isNotEmpty
                     ? IconButton(
