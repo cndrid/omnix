@@ -125,8 +125,17 @@ class StreamExtractor {
       }
     }
     // Ekstraksi langsung dulu; kalau gagal total, baru Piped.
+    final stopwatch = Stopwatch()..start();
     var candidates = await _directCandidates(videoId);
-    if (candidates.isEmpty) {
+    // Piped hanya dicoba kalau ekstraksi langsung gagal CEPAT. Kalau
+    // langsung saja sudah makan waktu lama (mis. mendekati timeout 15
+    // detik — jalur jaringan ke platform sedang lambat), Piped hampir
+    // pasti tidak menyelamatkan dan hanya menambah sampai 25 detik
+    // spinner (5 instance x 5 detik) sebelum UI boleh menampilkan
+    // error / coba lagi. Gagal cepat di sini lebih berguna daripada
+    // menunggu lama.
+    if (candidates.isEmpty &&
+        stopwatch.elapsed < const Duration(seconds: 10)) {
       candidates = await _pipedCandidates(videoId);
     }
     if (candidates.isNotEmpty) {
