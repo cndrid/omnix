@@ -43,7 +43,7 @@ jobs:
 
       - name: Build APK release
         working-directory: omniX-app
-        run: flutter build apk --release -Pandroid.injected.signing.store.file=upload-keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
+        run: flutter build apk --release -Pandroid.injected.signing.store.file=${{ github.workspace }}/omniX-app/android/app/upload-keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
       - name: Publish APK as GitHub Release
         uses: softprops/action-gh-release@v2
