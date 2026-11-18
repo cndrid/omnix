@@ -99,7 +99,7 @@ class SongCreditsModel {
     this.writers = const [],
     this.producers = const [],
     this.releaseYear,
-    this.label = 'YouTube Music',
+    this.label = 'OmniX',
     this.artistBio,
     this.upcomingConcerts = const [],
   });
@@ -113,7 +113,7 @@ class SongCreditsModel {
           .map((e) => e.toString())
           .toList(),
       releaseYear: json['release_year'] as String?,
-      label: (json['label'] as String?) ?? 'YouTube Music',
+      label: (json['label'] as String?) ?? 'OmniX',
       artistBio: json['artist_bio'] as String?,
       upcomingConcerts:
           ((json['upcoming_concerts'] as List<dynamic>?) ?? const [])
@@ -174,7 +174,7 @@ class TrackModel {
     return '';
   }
 
-  String get backupYoutubeThumbnailUrl {
+  String get backupThumbnailUrl {
     if (videoId.isNotEmpty) {
       return 'https://i.ytimg.com/vi/$videoId/mqdefault.jpg';
     }
@@ -227,7 +227,7 @@ class SongDetailModel {
   final String? transcript;
   final SongCreditsModel credits;
   final List<TrackModel> relatedTracks;
-  /// Rasio suka/tidak suka dari Return YouTube Dislike (opsional).
+  /// Rasio suka/tidak suka dari layanan pihak ketiga (opsional).
   final int? likes;
   final int? dislikes;
 
@@ -255,7 +255,7 @@ class SongDetailModel {
   });
 
   /// Label format sesuai stream asli (AAC/Opus + bitrate nyata).
-  /// Bukan lagi klaim "FLAC 24-bit" — stream YouTube itu m4a/opus.
+  /// Bukan lagi klaim "FLAC 24-bit" — stream audio itu m4a/opus.
   String get streamFormatLabel {
     final mime = (audioMimeType ?? '').toLowerCase();
     final codec = mime.contains('webm')
