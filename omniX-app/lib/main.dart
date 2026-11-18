@@ -1,10 +1,32 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'providers/app_providers.dart';
 import 'services/audio_handler_service.dart';
 import 'theme/omnix_theme.dart';
 import 'views/app_shell.dart';
+
+/// Minta izin notifikasi (POST_NOTIFICATIONS, Android 13+) saat pertama
+/// kali lagu mulai diputar — momennya jelas bagi pengguna ("agar kontrol
+/// lagu muncul di pusat kontrol"). Tanpa izin ini HyperOS bisa
+/// menyembunyikan notifikasi media sehingga kartu media tidak muncul di
+/// pusat kontrol / pil status bar. Kalau pengguna menolak, kartu tetap
+/// bisa diaktifkan manual lewat Settings HP. Bukan fatal kalau gagal.
+Future<void> _requestNotificationPermission() async {
+  if (!Platform.isAndroid) return;
+  try {
+    final status = await Permission.notification.status;
+    if (status.isGranted) return;
+    await Permission.notification.request();
+  } catch (_) {
+    // Gagal meminta izin — bukan fatal; pengguna tetap bisa mengaktifkan
+    // manual lewat Settings.
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +41,20 @@ Future<void> main() async {
       androidNotificationChannelName: 'OmniX',
       androidNotificationIcon: 'mipmap/ic_launcher',
     ),
+  );
+  // Izin notifikasi diminta sekali, saat lagu pertama kali mulai diputar
+  // (bukan saat aplikasi dibuka). onError dikosongkan sengaja: stream
+  // ini bisa membawa error player, dan listener ini tidak boleh mati
+  // karenanya.
+  var notificationPermissionRequested = false;
+  audioHandler.playbackState.listen(
+    (state) {
+      if (state.playing && !notificationPermissionRequested) {
+        notificationPermissionRequested = true;
+        unawaited(_requestNotificationPermission());
+      }
+    },
+    onError: (_) {},
   );
   runApp(
     ProviderScope(
