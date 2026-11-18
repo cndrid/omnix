@@ -16,11 +16,11 @@ class ApiException implements Exception {
 /// Fasade data OmniX — 100% client-side sejak 17 Nov 2026.
 ///
 /// Dulu semua method ini menembak backend FastAPI di Fly.io (sering kena
-/// SocketException, Failed host lookup, dan IP ban YouTube). Sekarang
+/// SocketException, Failed host lookup, dan IP ban dari platform). Sekarang
 /// semuanya jalan langsung dari HP:
 /// - pencarian / metadata / feed: InnerTube via youtube_explode_dart
 /// - lirik: LRCLIB (API publik, tanpa kunci)
-/// - skip sponsor & rasio dislike: SponsorBlock + Return YouTube Dislike
+/// - skip sponsor & rasio dislike: SponsorBlock + layanan rasio dislike
 ///
 /// Tanda tangan method dipertahankan supaya provider & view tidak berubah.
 class OmniXApiService {
@@ -50,7 +50,7 @@ class OmniXApiService {
   Future<bool> healthCheck() async {
     try {
       final res = await http
-          .get(Uri.parse('https://www.youtube.com'))
+          .get(Uri.parse('https://www.google.com'))
           .timeout(const Duration(seconds: 4));
       return res.statusCode == 200;
     } catch (_) {
@@ -76,7 +76,7 @@ class OmniXApiService {
           return await _yt.searchMusic(trimmed, limit: limit);
       }
     } catch (e) {
-      throw ApiException('Gagal mencari "$trimmed" di YouTube: $e');
+      throw ApiException('Gagal mencari "$trimmed": $e');
     }
   }
 
@@ -169,7 +169,7 @@ class OmniXApiService {
     }
   }
 
-  /// Thumbnail kini dipakai langsung dari YouTube — tidak perlu proxy.
+  /// Thumbnail kini dipakai langsung dari sumbernya — tidak perlu proxy.
   String proxyImageUrl(String? url, {String? videoId}) {
     if (url != null && url.isNotEmpty) return url;
     if (videoId != null && videoId.isNotEmpty) {

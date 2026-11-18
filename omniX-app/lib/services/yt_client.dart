@@ -1,13 +1,19 @@
 import 'dart:async';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../models/track_model.dart';
+import 'shared_stream_client.dart';
 
-/// Layanan YouTube 100% client-side (InnerTube, lewat youtube_explode_dart).
+/// Layanan musik 100% client-side (InnerTube, lewat youtube_explode_dart).
 ///
 /// Semua pencarian, metadata, dan feed beranda diambil langsung dari
 /// perangkat pengguna — tidak ada lagi server cloud di tengah jalan, jadi
-/// tidak ada risiko server mati, IP server diblokir YouTube, atau
+/// tidak ada risiko server mati, IP server diblokir platform, atau
 /// SocketException ke backend sendiri.
+///
+/// Fast start (18 Nov 2026): semua method memakai SATU instance
+/// [YoutubeExplode] bersama ([SharedStreamClient.instance]) — sebelumnya
+/// tiap method membuat instance baru lalu menutupnya, jadi tiap panggilan
+/// handshake/TLS ulang tanpa connection reuse.
 class YtClientService {
   static const Duration _timeout = Duration(seconds: 30);
 
@@ -39,9 +45,9 @@ class YtClientService {
     );
   }
 
-  /// Cari lagu/video di YouTube langsung dari HP.
+  /// Cari lagu/video langsung dari HP.
   /// Catatan: parser youtube_explode_dart 3.1.0 crash (NoSuchMethodError
-  /// getT) untuk sebagian query — YouTube mengembalikan item khusus
+  /// getT) untuk sebagian query — platform mengembalikan item khusus
   /// (shelf/kartu) yang tidak bisa di-parse. Kalau halaman pertama
   /// kosong, coba halaman berikutnya sekali.
   Future<List<TrackModel>> searchMusic(
@@ -50,25 +56,21 @@ class YtClientService {
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
-    final yt = YoutubeExplode();
-    try {
-      var page = await yt.search.search(trimmed).timeout(_timeout);
-      var videos = page.toList();
-      if (videos.isEmpty) {
-        final next = await page.nextPage().timeout(_timeout);
-        if (next != null) videos = next.toList();
-      }
-      final tracks = <TrackModel>[];
-      for (final v in videos) {
-        // Lewati live stream / video tanpa durasi.
-        if (v.duration == null) continue;
-        tracks.add(_videoToTrack(v));
-        if (tracks.length >= limit) break;
-      }
-      return tracks;
-    } finally {
-      yt.close();
+    final yt = SharedStreamClient.instance;
+    var page = await yt.search.search(trimmed).timeout(_timeout);
+    var videos = page.toList();
+    if (videos.isEmpty) {
+      final next = await page.nextPage().timeout(_timeout);
+      if (next != null) videos = next.toList();
     }
+    final tracks = <TrackModel>[];
+    for (final v in videos) {
+      // Lewati live stream / video tanpa durasi.
+      if (v.duration == null) continue;
+      tracks.add(_videoToTrack(v));
+      if (tracks.length >= limit) break;
+    }
+    return tracks;
   }
 
   /// Cari artis (channel) — dipakai filter "Artis" di layar Cari.
@@ -78,26 +80,22 @@ class YtClientService {
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
-    final yt = YoutubeExplode();
-    try {
-      final results =
-          await yt.search.searchContent(trimmed).timeout(_timeout);
-      final out = <TrackModel>[];
-      for (final r in results) {
-        if (r is! SearchChannel) continue;
-        out.add(TrackModel(
-          videoId: '',
-          title: r.name,
-          artists: [ArtistModel(name: r.name)],
-          resultType: 'artist',
-          category: 'artist',
-        ));
-        if (out.length >= limit) break;
-      }
-      return out;
-    } finally {
-      yt.close();
+    final yt = SharedStreamClient.instance;
+    final results =
+        await yt.search.searchContent(trimmed).timeout(_timeout);
+    final out = <TrackModel>[];
+    for (final r in results) {
+      if (r is! SearchChannel) continue;
+      out.add(TrackModel(
+        videoId: '',
+        title: r.name,
+        artists: [ArtistModel(name: r.name)],
+        resultType: 'artist',
+        category: 'artist',
+      ));
+      if (out.length >= limit) break;
     }
+    return out;
   }
 
   /// Cari playlist — dipakai filter "Playlist" di layar Cari.
@@ -107,27 +105,23 @@ class YtClientService {
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
-    final yt = YoutubeExplode();
-    try {
-      final results =
-          await yt.search.searchContent(trimmed).timeout(_timeout);
-      final out = <TrackModel>[];
-      for (final r in results) {
-        if (r is! SearchPlaylist) continue;
-        out.add(TrackModel(
-          // videoId dipakai untuk menyimpan id playlist di pseudo-track.
-          videoId: r.id.value,
-          title: r.title,
-          artists: const [],
-          resultType: 'playlist',
-          category: 'playlist',
-        ));
-        if (out.length >= limit) break;
-      }
-      return out;
-    } finally {
-      yt.close();
+    final yt = SharedStreamClient.instance;
+    final results =
+        await yt.search.searchContent(trimmed).timeout(_timeout);
+    final out = <TrackModel>[];
+    for (final r in results) {
+      if (r is! SearchPlaylist) continue;
+      out.add(TrackModel(
+        // videoId dipakai untuk menyimpan id playlist di pseudo-track.
+        videoId: r.id.value,
+        title: r.title,
+        artists: const [],
+        resultType: 'playlist',
+        category: 'playlist',
+      ));
+      if (out.length >= limit) break;
     }
+    return out;
   }
 
   /// Isi sebuah playlist (video-video di dalamnya).
@@ -135,61 +129,51 @@ class YtClientService {
     String playlistId, {
     int limit = 30,
   }) async {
-    final yt = YoutubeExplode();
-    try {
-      final videos = await yt.playlists
-          .getVideos(PlaylistId(playlistId))
-          .take(limit)
-          .toList()
-          .timeout(_timeout);
-      final tracks = <TrackModel>[];
-      for (final v in videos) {
-        if (v.duration == null) continue;
-        tracks.add(_videoToTrack(v));
-        if (tracks.length >= limit) break;
-      }
-      return tracks;
-    } finally {
-      yt.close();
+    final yt = SharedStreamClient.instance;
+    final videos = await yt.playlists
+        .getVideos(PlaylistId(playlistId))
+        .take(limit)
+        .toList()
+        .timeout(_timeout);
+    final tracks = <TrackModel>[];
+    for (final v in videos) {
+      if (v.duration == null) continue;
+      tracks.add(_videoToTrack(v));
+      if (tracks.length >= limit) break;
     }
+    return tracks;
   }
 
   /// Detail lagu: judul, artis, durasi, thumbnail, dan lagu terkait.
   /// Stream audio & lirik diisi oleh pemanggil (StreamExtractor + LRCLIB).
   Future<SongDetailModel> getSongDetail(String videoId) async {
-    final yt = YoutubeExplode();
+    final yt = SharedStreamClient.instance;
+    final v = await yt.videos.get(videoId).timeout(_timeout);
+    final track = _videoToTrack(v);
+    List<TrackModel> related = const [];
     try {
-      final v =
-          await yt.videos.get(videoId).timeout(_timeout);
-      final track = _videoToTrack(v);
-      List<TrackModel> related = const [];
-      try {
-        related = await searchMusic('${v.author} lagu', limit: 6);
-        related =
-            related.where((t) => t.videoId != videoId).toList();
-      } catch (_) {
-        related = const [];
-      }
-      return SongDetailModel(
-        videoId: track.videoId,
-        title: track.title,
-        artists: track.artists,
-        lengthSeconds: track.durationSeconds ?? 0,
-        thumbnails: track.thumbnails,
-        relatedTracks: related,
-      );
-    } finally {
-      yt.close();
+      related = await searchMusic('${v.author} lagu', limit: 6);
+      related = related.where((t) => t.videoId != videoId).toList();
+    } catch (_) {
+      related = const [];
     }
+    return SongDetailModel(
+      videoId: track.videoId,
+      title: track.title,
+      artists: track.artists,
+      lengthSeconds: track.durationSeconds ?? 0,
+      thumbnails: track.thumbnails,
+      relatedTracks: related,
+    );
   }
 
   /// Feed beranda client-side: beberapa seksi dari pencarian terkurasi.
-  /// Bukan feed YouTube Music (itu hanya ada lewat server), tapi hasilnya
+  /// Bukan feed kurasi server (itu hanya ada lewat server), tapi hasilnya
   /// lagu Indonesia karena kata kuncinya berbahasa Indonesia.
   Future<ExploreDataModel> getExploreData({int limit = 6}) async {
     // Query di bawah sudah diverifikasi lolos parser
     // youtube_explode_dart 3.1.0 (sebagian query lain crash di parser
-    // karena item khusus YouTube — lihat searchMusic).
+    // karena item khusus platform — lihat searchMusic).
     const defs = <(String, String)>[
       ('Trending Indonesia', 'musik Indonesia terpopuler'),
       ('Pop Indonesia', 'lagu pop Indonesia'),
@@ -212,7 +196,7 @@ class YtClientService {
       }
     }
 
-    // Sekuensial, bukan paralel: YouTube membatasi request pencarian
+    // Sekuensial, bukan paralel: platform membatasi request pencarian
     // bersamaan dari satu IP — paralel sering membuat sebagian seksi
     // gagal dimuat (terbukti di pengujian: hanya 1 dari 4 yang lolos).
     final sections = <ExploreSectionModel>[];
@@ -296,13 +280,9 @@ class YtClientService {
 
   /// Radio: lagu-lagu dari artis yang sama.
   Future<List<TrackModel>> getRadio(String videoId) async {
-    final yt = YoutubeExplode();
-    try {
-      final v = await yt.videos.get(videoId).timeout(_timeout);
-      final tracks = await searchMusic('${v.author} lagu', limit: 20);
-      return tracks.where((t) => t.videoId != videoId).toList();
-    } finally {
-      yt.close();
-    }
+    final yt = SharedStreamClient.instance;
+    final v = await yt.videos.get(videoId).timeout(_timeout);
+    final tracks = await searchMusic('${v.author} lagu', limit: 20);
+    return tracks.where((t) => t.videoId != videoId).toList();
   }
 }

@@ -18,8 +18,8 @@ class SkipSegment {
   });
 }
 
-/// Rasio suka/tidak suka dari Return YouTube Dislike
-/// (https://returnyoutubedislikeapi.com) — API publik gratis.
+/// Rasio suka/tidak suka dari layanan pihak ketiga
+/// (API publik gratis).
 class VideoVotes {
   final int likes;
   final int dislikes;
