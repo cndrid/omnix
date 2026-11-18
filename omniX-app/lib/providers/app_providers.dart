@@ -504,6 +504,19 @@ class PlayerController extends StateNotifier<PlayerViewState> {
   /// background) tidak menimpa state milik lagu yang baru dipilih.
   int _selectGeneration = 0;
 
+  /// Lagu yang selectTrack-nya sedang berjalan (ekstraksi/pemuatan).
+  /// Ketukan ganda pada baris lagu yang sama (tile tetap bisa diketuk
+  /// saat loading — tidak ada guard di TrackTile) tidak boleh membuat dua
+  /// selectTrack bersamaan: keduanya berebut setAudioSource/player yang
+  /// sama dan yang kalah menandai "gagal" padahal lagu sudah bunyi
+  /// (bug 2). Ketukan kedua pada lagu yang sama saat masih dimuat
+  /// diabaikan; selectTrack yang sedang jalan akan memutarnya.
+  String? _selectingVideoId;
+
+  void _clearSelecting(String videoId) {
+    if (_selectingVideoId == videoId) _selectingVideoId = null;
+  }
+
   PlayerController({
     required OmniXApiService api,
     required OmniXAudioHandler audioHandler,
@@ -539,6 +552,17 @@ class PlayerController extends StateNotifier<PlayerViewState> {
     _subscriptions.add(
       player.positionStream.listen((pos) {
         state = state.copyWith(position: pos);
+        // Bukti keras lagu benar-benar bunyi: posisi maju hanya kalau
+        // platform sedang me-render audio. Kalau kartu error (dari
+        // percobaan play yang kedaluwarsa) masih tampil saat posisi sudah
+        // maju, error itu palsu — sembunyikan. Ini jaring pengaman bug 2
+        // untuk kasus play() yatim yang baru menyampaikan perintah putar
+        // ke platform SETELAH selectTrack menyatakan gagal.
+        if (pos > Duration.zero &&
+            state.errorMessage != null &&
+            state.currentTrack != null) {
+          state = state.copyWith(clearError: true);
+        }
       }),
     );
     _subscriptions.add(
@@ -568,6 +592,17 @@ class PlayerController extends StateNotifier<PlayerViewState> {
     bool openFullscreen = false,
     String? djCommentary,
   }) async {
+    // Ketukan ganda pada lagu yang sama saat masih dimuat: abaikan —
+    // selectTrack yang sedang jalan akan memutarnya (lihat
+    // _selectingVideoId). Guard ini dicek SEBELUM generation naik, supaya
+    // ketukan kedua tidak ikut mengacaukan selectTrack pertama.
+    if (_selectingVideoId == track.videoId) return;
+    _selectingVideoId = track.videoId;
+    // Stopwatch diagnosis (bug start lambat): berapa lama dari ketuk
+    // sampai bunyi / gagal — supaya video berikutnya bisa dipastikan
+    // bagiannya, bukan ditebak. Lihat debugPrint di bawah.
+    final selectStopwatch = Stopwatch()..start();
+
     _library.recordRecent(track);
     final generation = ++_selectGeneration;
 
@@ -590,32 +625,37 @@ class PlayerController extends StateNotifier<PlayerViewState> {
       isFullscreenOpen: openFullscreen ? true : state.isFullscreenOpen,
     );
 
-    // Fast start (18 Nov 2026): ekstraksi stream + detail lagu jalan
-    // BERSAMAAN, dan lagu mulai diputar begitu kandidat stream didapat —
-    // detail (termasuk lirik LRCLIB + vote RYD) TIDAK LAGI ditunggu sebelum
-    // putar. Dulu dua jaringan ini berurutan, jadi ketukan pertama lambat.
-    // Detail dilampirkan menyusul lewat _attachDetail.
+    // Fast start (18 Nov 2026, direvisi bug start lambat): jalur start
+    // HANYA menunggu ekstraksi stream. Segmen sponsor (SponsorBlock,
+    // timeout sampai 8 detik) TIDAK LAGI ikut di Future.wait — datanya
+    // baru dipakai untuk lompat otomatis, jadi diambil menyusul setelah
+    // lagu bunyi (lihat _attachSkipSegments). Sebelumnya fetch ini ikut
+    // mengunci start sampai 8 detik walau stream sudah didapat.
+    // Detail lagu (termasuk lirik LRCLIB + vote RYD) juga tetap paralel
+    // dan tidak ditunggu sebelum putar. Detail dilampirkan menyusul lewat
+    // _attachDetail.
     final detailFuture = _api.getSongDetail(track.videoId);
 
     try {
-      // Ekstraksi + segmen sponsor bersamaan; satu kali getManifest untuk
-      // URL dan info format (lihat StreamExtractor.extractAudioCandidates).
-      final results = await Future.wait([
-        StreamExtractor.extractAudioCandidates(track.videoId),
-        _api.getSkipSegments(track.videoId).catchError(
-              (_) => <SkipSegment>[],
-            ),
-      ]);
+      final candidates =
+          await StreamExtractor.extractAudioCandidates(track.videoId);
+      debugPrint(
+        '[OmniX-timing] extract ${track.videoId}: '
+        '${selectStopwatch.elapsedMilliseconds} ms, '
+        '${candidates.length} kandidat',
+      );
       // Lagu lain sudah dipilih selama menunggu: serahkan state ke
       // selectTrack yang baru, jangan sentuh apa pun lagi.
       if (generation != _selectGeneration) return;
-      final candidates = (results[0] as List<AudioCandidate>).toList();
-      final skipSegments = results[1] as List<SkipSegment>;
       final bestInfo = candidates.isEmpty ? null : candidates.first;
 
       // Coba kandidat satu per satu: kalau URL pertama gagal dimuat
-      // (mis. format ditolak player, atau play() timeout karena audio
-      // focus ditolak), coba format berikutnya — bukan langsung error.
+      // (mis. format ditolak player), coba format berikutnya — bukan
+      // langsung error. Tapi kalau yang gagal adalah `play()`-nya
+      // (PlayStartException: audio focus ditolak / pemutar tidak
+      // merespons), JANGAN lanjut ke kandidat berikut: itu kondisi
+      // global pemutar, bukan URL-nya — tiap kandidat hanya mengulang
+      // jeda timeout yang sama (±12 detik per kandidat).
       String? lastError;
       var played = false;
       for (final candidate in candidates) {
@@ -624,17 +664,45 @@ class PlayerController extends StateNotifier<PlayerViewState> {
           await _audioHandler.loadAndPlay(
             track: track,
             streamUrl: candidate.url,
-            skipSegments: skipSegments,
           );
           played = true;
           break;
         } catch (e) {
           if (generation != _selectGeneration) return;
           lastError = e.toString();
+          if (e is PlayStartException) break;
         }
       }
       if (generation != _selectGeneration) return;
       if (!played) {
+        // Sebelum menampilkan kartu error, periksa kebenaran di
+        // lapangan (bug 2): `play()` yang timeout TIDAK membatalkan
+        // perintah putarnya — future yatim itu bisa tetap menyampaikan
+        // play ke platform belakangan, jadi lagu bisa sudah bunyi walau
+        // semua kandidat "gagal". Posisi yang sudah maju adalah bukti
+        // keras audio me-render — kalau begitu, anggap berhasil dan
+        // jangan tampilkan error palsu.
+        if (_audioHandler.player.playing &&
+            _audioHandler.player.position > Duration.zero) {
+          state = state.copyWith(isLoadingTrack: false, clearError: true);
+          debugPrint(
+            '[OmniX-timing] selectTrack ${track.videoId}: error '
+            'ditahan — posisi sudah ${_audioHandler.player.position}',
+          );
+          _prefetchNext();
+          unawaited(_attachDetail(
+            detailFuture,
+            track,
+            customQueue,
+            generation,
+            bestInfo,
+          ));
+          return;
+        }
+        debugPrint(
+          '[OmniX-timing] selectTrack ${track.videoId}: gagal setelah '
+          '${selectStopwatch.elapsedMilliseconds} ms: $lastError',
+        );
         state = state.copyWith(
           isLoadingTrack: false,
           errorMessage: lastError ??
@@ -655,7 +723,17 @@ class PlayerController extends StateNotifier<PlayerViewState> {
       // baru false DI SINI — setelah loadAndPlay berhasil — bukan setelah
       // getSongDetail. Selama ekstraksi + load, tombol play tetap nonaktif
       // sehingga ketukan play dini tidak bisa membuat flag playing basi.
-      state = state.copyWith(isLoadingTrack: false);
+      // clearError: percobaan sebelumnya (atau selectTrack lain yang
+      // tumpang tindih) bisa saja sudah menandai error padahal lagu ini
+      // akhirnya bunyi — kartu error tidak boleh bertahan di atas lagu
+      // yang sedang jalan (bug 2).
+      state = state.copyWith(isLoadingTrack: false, clearError: true);
+      debugPrint(
+        '[OmniX-timing] selectTrack ${track.videoId}: mulai bunyi '
+        'setelah ${selectStopwatch.elapsedMilliseconds} ms',
+      );
+      // Segmen sponsor diambil menyusul (tidak mengunci start).
+      unawaited(_attachSkipSegments(track.videoId, generation));
       // Prefetch lagu berikutnya di background supaya pencet next langsung
       // jalan (cache memori StreamExtractor sudah hangat).
       _prefetchNext();
@@ -674,7 +752,28 @@ class PlayerController extends StateNotifier<PlayerViewState> {
         isLoadingTrack: false,
         errorMessage: e.toString(),
       );
+    } finally {
+      // Lepas guard ketukan ganda. No-op kalau lagu lain sudah dipilih
+      // (flag sudah milik selectTrack yang baru).
+      _clearSelecting(track.videoId);
     }
+  }
+
+  /// Segmen sponsor (SponsorBlock) diambil MENYUSUL setelah lagu mulai
+  /// bunyi — tidak mengunci start (bug start lambat: fetch ini dulu ikut
+  /// di Future.wait dengan timeout 8 detik). Kalau pengguna sudah pindah
+  /// lagu lain, hasilnya dibuang. Kalau fetch gagal, lagu tetap jalan
+  /// tanpa lompat otomatis.
+  Future<void> _attachSkipSegments(String videoId, int generation) async {
+    List<SkipSegment> segments;
+    try {
+      segments = await _api.getSkipSegments(videoId);
+    } catch (_) {
+      return;
+    }
+    if (generation != _selectGeneration) return;
+    if (state.currentTrack?.videoId != videoId) return;
+    _audioHandler.updateSkipSegments(segments);
   }
 
   /// Detail lagu (judul lengkap, lirik, vote, lagu terkait) dilampirkan
