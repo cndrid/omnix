@@ -283,15 +283,26 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
                                   horizontal: 32,
                                   vertical: 16,
                                 ),
-                                child: _buildMainPlayerColumn(
-                                  context,
-                                  track,
-                                  detail,
-                                  playerState,
-                                  engineState,
-                                  isLiked,
-                                  isDownloaded,
-                                  controller,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildMainPlayerTop(
+                                      context,
+                                      track,
+                                      detail,
+                                      playerState,
+                                      controller,
+                                    ),
+                                    _buildPlaybackControls(
+                                      context,
+                                      track,
+                                      playerState,
+                                      engineState,
+                                      isLiked,
+                                      isDownloaded,
+                                      controller,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -308,27 +319,55 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
                             ),
                           ],
                         )
-                      : ListView(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+                      : Column(
                           children: [
-                            _buildMainPlayerColumn(
-                              context,
-                              track,
-                              detail,
-                              playerState,
-                              engineState,
-                              isLiked,
-                              isDownloaded,
-                              controller,
+                            Expanded(
+                              child: ListView(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  8,
+                                  20,
+                                  12,
+                                ),
+                                children: [
+                                  _buildMainPlayerTop(
+                                    context,
+                                    track,
+                                    detail,
+                                    playerState,
+                                    controller,
+                                  ),
+                                  const SizedBox(height: 24),
+                                  SizedBox(
+                                    height: 460,
+                                    child: _buildSidePanel(
+                                      context,
+                                      detail,
+                                      playerState,
+                                      libraryState,
+                                      controller,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            const SizedBox(height: 24),
-                            SizedBox(
-                              height: 460,
-                              child: _buildSidePanel(
+                            // Kontrol putar di-pin di bawah area scroll:
+                            // kartu error di atas tidak bisa lagi mendorong
+                            // tombol play sampai terpotong tepi bawah layar.
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                0,
+                                20,
+                                12,
+                              ),
+                              child: _buildPlaybackControls(
                                 context,
-                                detail,
+                                track,
                                 playerState,
-                                libraryState,
+                                engineState,
+                                isLiked,
+                                isDownloaded,
                                 controller,
                               ),
                             ),
@@ -343,14 +382,15 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
     );
   }
 
-  Widget _buildMainPlayerColumn(
+  /// Bagian atas pemutar (artwork, judul, kartu error, slider): boleh
+  /// di-scroll. Kartu error tinggal di sini supaya kemunculannya tidak
+  /// pernah menggeser kontrol putar — kontrol di-pin di bawah lewat
+  /// [_buildPlaybackControls] (bug 3: tombol play terpotong).
+  Widget _buildMainPlayerTop(
     BuildContext context,
     TrackModel track,
     SongDetailModel? detail,
     PlayerViewState playerState,
-    AudioEngineSettingsState engineState,
-    bool isLiked,
-    bool isDownloaded,
     PlayerController controller,
   ) {
     final theme = Theme.of(context);
@@ -576,6 +616,29 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  /// Kontrol putar + aksi (Antrean/Suka/Unduh/Output): selalu terlihat
+  /// penuh. Di layar kecil (mobile) widget ini di-pin di bawah area
+  /// scroll, jadi kartu error atau banner tidak bisa mendorong tombol
+  /// play sampai keluar layar.
+  Widget _buildPlaybackControls(
+    BuildContext context,
+    TrackModel track,
+    PlayerViewState playerState,
+    AudioEngineSettingsState engineState,
+    bool isLiked,
+    bool isDownloaded,
+    PlayerController controller,
+  ) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,

@@ -27,9 +27,23 @@ class OmniXAppShell extends ConsumerWidget {
     final isDesktop = width >= OmniXTokens.breakpointDesktop;
     final hasActiveTrack = playerState.currentTrack != null;
 
-    // Mini player ramping (~56) + navbar pill (~64) + jarak: 160.
+    // Geometri overlay bawah (mobile), dihitung dari bawah layar:
+    // nav pill: jarak bawah 16 + tinggi 64 (target sentuh 48 + padding
+    // vertikal 8+8) -> tepi atas nav di 80 dari bawah.
+    // Mini player: duduk DI ATAS nav dengan jarak 12 -> bawah 92.
+    // Tinggi mini player ~67 (baris 48 + padding 8+8 + progres 2,5).
+    // Padding konten = 92 + 67 + 9 (jarak konten) = 168.
+    // (Dulu mini player di 88, jarak ke nav cuma 8 — di HP terbaca
+    // numpuk/tertutup nav; komentar lama juga salah tulis tinggi
+    // mini player "~56", padahal ~67.)
+    const double navBottomMargin = 16.0;
+    const double navHeight = OmniXTokens.minTouchTarget + 16.0;
+    const double miniPlayerGap = 12.0;
+    final double miniPlayerBottom =
+        isMobile ? navBottomMargin + navHeight + miniPlayerGap : 16.0;
+
     final bottomSafePadding = hasActiveTrack
-        ? (isMobile ? 160.0 : 116.0)
+        ? (isMobile ? 168.0 : 116.0)
         : (isMobile ? 104.0 : 32.0);
 
     final pages = [
@@ -209,24 +223,14 @@ class OmniXAppShell extends ConsumerWidget {
                             ),
                           ),
                         ),
-                        if (hasActiveTrack)
-                          Positioned(
-                            left: isMobile ? 12 : 24,
-                            right: isMobile ? 12 : 24,
-                            bottom: isMobile ? 88 : 16,
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints:
-                                    const BoxConstraints(maxWidth: 760),
-                                child: const StickyMiniPlayer(),
-                              ),
-                            ),
-                          ),
+                        // Nav dulu, mini player sesudahnya: kalau keduanya
+                        // bersentuhan (mis. skala font sistem besar), mini
+                        // player yang tampil di atas dan tetap bisa diketuk.
                         if (isMobile)
                           Positioned(
                             left: 16,
                             right: 16,
-                            bottom: 16,
+                            bottom: navBottomMargin,
                             child: Center(
                               child: ConstrainedBox(
                                 constraints:
@@ -238,6 +242,19 @@ class OmniXAppShell extends ConsumerWidget {
                                         tab;
                                   },
                                 ),
+                              ),
+                            ),
+                          ),
+                        if (hasActiveTrack)
+                          Positioned(
+                            left: isMobile ? 12 : 24,
+                            right: isMobile ? 12 : 24,
+                            bottom: miniPlayerBottom,
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 760),
+                                child: const StickyMiniPlayer(),
                               ),
                             ),
                           ),
