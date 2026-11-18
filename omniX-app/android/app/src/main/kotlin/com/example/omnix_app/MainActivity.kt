@@ -1,5 +1,8 @@
 package com.example.omnix_app
 
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 
-class MainActivity : FlutterActivity()
+// Mewarisi AudioServiceActivity supaya activity memakai FlutterEngine
+// bersama milik audio_service — syarat agar media session / notifikasi
+// media audio_service terhubung ke aplikasi.
+class MainActivity : AudioServiceActivity()
