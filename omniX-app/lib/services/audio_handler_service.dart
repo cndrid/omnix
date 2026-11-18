@@ -8,6 +8,20 @@ import '../models/track_model.dart';
 import 'skip_service.dart';
 import 'stream_extractor.dart';
 
+/// Gagal memulai pemutaran karena `play()` tidak kembali (biasanya audio
+/// focus Android ditolak / platform tidak merespons) — BUKAN karena URL-nya
+/// jelek. Pemanggil membedakannya dari gagal muat sumber: gagal focus itu
+/// kondisi global pemutar, jadi mencoba kandidat URL lain dengan `play()`
+/// yang sama hanya mengulang jeda timeout yang sama (±12 detik per
+/// kandidat). Lihat [OmniXAudioHandler.loadAndPlay].
+class PlayStartException implements Exception {
+  final String message;
+  const PlayStartException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// Handler audio OmniX: just_audio + audio_service.
 ///
 /// Ketahanan jaringan (17 Nov 2026):
@@ -80,7 +94,15 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
 
   OmniXAudioHandler() {
     _initAudioSession();
-    _player.playbackEventStream.map(_transformEvent).pipe(playbackState);
+    // JANGAN pakai .pipe() di sini: pipe meneruskan error source ke
+    // playbackState, dan loop `await for` audio_service (tanpa try/catch)
+    // mati selamanya saat satu error masuk — media session tidak pernah
+    // aktif (kartu media HyperOS hilang) walau lagu tetap bunyi. Error
+    // sudah ditangani _playbackEventSub di bawah (auto-recovery).
+    _player.playbackEventStream.listen(
+      (event) => playbackState.add(_transformEvent(event)),
+      onError: (_) {},
+    );
     _processingStateSub =
         _player.processingStateStream.listen(_onProcessingState);
     _playingSub = _player.playingStream.listen((playing) {
@@ -327,7 +349,13 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
     if (!isRecoveryAttempt && myGeneration != _loadGeneration) {
       throw StateError('Pemuatan dibatalkan: lagu lain sudah dipilih.');
     }
-    await _player.setAudioSource(source, initialPosition: startPosition);
+    // Batas waktu pemuatan sumber (bug start lambat): tanpa ini, prepare
+    // ExoPlayer yang macet (mis. host stream lambat) menggantung satu
+    // kandidat selamanya dan pemutar tidak pernah lanjut ke kandidat
+    // berikut. Timeout -> lempar -> pemanggil coba kandidat berikutnya.
+    await _player
+        .setAudioSource(source, initialPosition: startPosition)
+        .timeout(const Duration(seconds: 10));
     // Periksa lagi setelah sumber dimuat: lagu lain bisa saja dipilih
     // selama setAudioSource berjalan.
     if (!isRecoveryAttempt && myGeneration != _loadGeneration) {
@@ -340,7 +368,11 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
     // kandidat berikut, bukan menggantung diam-diam.
     final started = await _playWithTimeout();
     if (!started) {
-      throw Exception(
+      // Sengaja tipe sendiri (bukan Exception umum): pemanggil harus bisa
+      // membedakan "play() menggantung" (masalah global pemutar/focus)
+      // dari "sumber gagal dimuat" (masalah URL itu) — lihat loop kandidat
+      // di PlayerController.selectTrack.
+      throw const PlayStartException(
         'Pemutaran tidak dimulai (audio focus ditolak atau pemutar tidak merespons).',
       );
     }
@@ -372,10 +404,26 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
     }
   }
 
+  /// Segmen sponsor yang datang MENYUSUL setelah lagu mulai bunyi (jalur
+  /// start tidak lagi menunggu SponsorBlock — lihat PlayerController).
+  /// Pasang + aktifkan watcher-nya; kalau posisi sudah masuk segmen,
+  /// position event berikutnya langsung melompatinya.
+  void updateSkipSegments(List<SkipSegment> segments) {
+    _skipSegments = segments;
+    if (_currentTrack != null) {
+      _watchSkipSegments();
+    }
+  }
+
   /// Lewati segmen sponsor/intro/outro secara otomatis saat posisi
   /// pemutaran memasukinya.
   void _watchSkipSegments() {
     if (_skipSegments.isEmpty) return;
+    // Batalkan subscription lama dulu: metode ini bisa dipanggil dua kali
+    // (sekali dari loadAndPlay, sekali saat segmen datang menyusul) —
+    // tanpa ini ada dua listener yang sama-sama memanggil seek.
+    unawaited(_positionSub?.cancel());
+    _positionSub = null;
     _positionSub = _player.positionStream.listen((pos) {
       for (final seg in _skipSegments) {
         final start = Duration(
