@@ -159,7 +159,7 @@ class LibraryView extends ConsumerWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Ketuk ikon hati atau ikon unduh pada lagu di Beranda dan Cari untuk menyimpannya di Koleksi.',
+                  'Ketuk ikon + atau ikon unduh pada lagu di Beranda dan Cari untuk menyimpannya di Koleksi.',
                   style: theme.textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -264,7 +264,8 @@ class LibraryView extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(OmniXTokens.radiusThumb),
                 ),
                 child: Icon(
-                  Icons.favorite_rounded,
+                  // Lagu disukai ditandai "+" sesuai preview v2 (bukan hati).
+                  Icons.add_rounded,
                   color: scheme.onPrimary,
                   size: 30,
                 ),
