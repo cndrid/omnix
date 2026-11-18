@@ -37,9 +37,13 @@ jobs:
           sed -i 's|http://127.0.0.1:8000|https://omnix-h6cnva.fly.dev|g' lib/providers/app_providers.dart lib/services/api_service.dart lib/views/profile_view.dart
           grep -rn "omnix-h6cnva.fly.dev" lib/providers/app_providers.dart lib/services/api_service.dart
 
+      - name: Decode release keystore
+        working-directory: omniX-app
+        run: printf '%s' "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/upload-keystore.jks
+
       - name: Build APK release
         working-directory: omniX-app
-        run: flutter build apk --release
+        run: flutter build apk --release -Pandroid.injected.signing.store.file=upload-keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
       - name: Publish APK as GitHub Release
         uses: softprops/action-gh-release@v2
