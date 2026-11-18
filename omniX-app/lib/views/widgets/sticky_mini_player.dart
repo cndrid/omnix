@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/app_providers.dart';
 import '../../theme/omnix_theme.dart';
 import 'liquid_glass_box.dart';
+import 'like_plus_button.dart';
 import 'queue_sheet.dart';
 import 'sleep_timer_sheet.dart';
 import 'track_artwork.dart';
@@ -176,20 +177,17 @@ class _StickyMiniPlayerState extends ConsumerState<StickyMiniPlayer> {
                             ),
                           ],
                         ),
-                        IconButton(
+                        // Suka pakai "+" (preview v2), bukan hati.
+                        LikePlusButton(
+                          isLiked: isLiked,
+                          onToggle: () {
+                            ref
+                                .read(libraryProvider.notifier)
+                                .toggleLike(track);
+                          },
                           tooltip: isLiked
                               ? 'Hapus dari lagu disukai'
                               : 'Tambahkan ke lagu disukai',
-                          onPressed: () {
-                            ref.read(libraryProvider.notifier).toggleLike(track);
-                          },
-                          icon: Icon(
-                            isLiked ? Icons.favorite : Icons.favorite_border,
-                            color: isLiked
-                                ? scheme.primary
-                                : scheme.onSurfaceVariant,
-                            size: 20,
-                          ),
                         ),
                         IconButton(
                           tooltip: playerState.isPlaying ? 'Jeda lagu' : 'Putar lagu',

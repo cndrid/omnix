@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track_model.dart';
 import '../../providers/app_providers.dart';
 import '../../theme/omnix_theme.dart';
+import 'like_plus_button.dart';
 import 'queue_sheet.dart';
 import 'track_artwork.dart';
 
@@ -41,6 +42,18 @@ class TrackTile extends ConsumerStatefulWidget {
 class _TrackTileState extends ConsumerState<TrackTile> {
   bool _isFocused = false;
   bool _isHovered = false;
+
+  /// Toggle suka; saat lagu baru ditambahkan tampilkan toast seperti
+  /// preview v2 ("Added to Liked Songs").
+  void _handleLikeToggle() {
+    final wasLiked = widget.isLiked;
+    widget.onToggleLike?.call();
+    if (!wasLiked && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Added to Liked Songs')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -157,7 +170,7 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                             ),
                             const SizedBox(width: 6),
                           ],
-                          Expanded(
+                          Flexible(
                             child: Text(
                               widget.track.title,
                               maxLines: 1,
@@ -165,6 +178,11 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                               style: theme.textTheme.titleMedium,
                             ),
                           ),
+                          // Badge eksplisit "E" di samping judul (preview v2).
+                          if (widget.track.isExplicit) ...[
+                            const SizedBox(width: 5),
+                            const ExplicitBadge(),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -310,18 +328,15 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                       size: 20,
                     ),
                   ),
-                IconButton(
+                // Suka pakai "+" (preview v2), bukan hati.
+                LikePlusButton(
+                  isLiked: widget.isLiked,
+                  onToggle: widget.onToggleLike == null
+                      ? null
+                      : _handleLikeToggle,
                   tooltip: widget.isLiked
                       ? 'Hapus ${widget.track.title} dari lagu disukai'
                       : 'Simpan ${widget.track.title} ke lagu disukai',
-                  onPressed: widget.onToggleLike,
-                  icon: Icon(
-                    widget.isLiked ? Icons.favorite : Icons.favorite_border,
-                    color: widget.isLiked
-                        ? scheme.primary
-                        : scheme.onSurfaceVariant,
-                    size: 20,
-                  ),
                 ),
                 ],
               ],

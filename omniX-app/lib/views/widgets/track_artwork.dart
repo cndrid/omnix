@@ -10,7 +10,8 @@ class TrackArtwork extends StatelessWidget {
     super.key,
     required this.track,
     this.size = 50,
-    this.borderRadius = 12,
+    // Radius artwork 4px sesuai preview UI v2.
+    this.borderRadius = 4,
   });
 
   static const List<List<Color>> _discPalettes = [
@@ -25,7 +26,6 @@ class TrackArtwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primaryUrl = track.bestThumbnailUrl;
-    final backupUrl = track.backupYoutubeThumbnailUrl;
 
     return SizedBox(
       width: size,
@@ -39,26 +39,12 @@ class TrackArtwork extends StatelessWidget {
                 height: size,
                 fit: BoxFit.cover,
                 semanticLabel: 'Sampul album ${track.title}',
-                errorBuilder: (_, __, ___) {
-                  if (backupUrl.isNotEmpty && backupUrl != primaryUrl) {
-                    return Image.network(
-                      backupUrl,
-                      width: size,
-                      height: size,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _VinylDiscArtwork(
-                        track: track,
-                        size: size,
-                        palette: _pickPalette(track.title),
-                      ),
-                    );
-                  }
-                  return _VinylDiscArtwork(
-                    track: track,
-                    size: size,
-                    palette: _pickPalette(track.title),
-                  );
-                },
+                // Gagal dimuat -> placeholder gradien + ikon not musik.
+                errorBuilder: (_, __, ___) => _VinylDiscArtwork(
+                  track: track,
+                  size: size,
+                  palette: _pickPalette(track.title),
+                ),
               )
             : _VinylDiscArtwork(
                 track: track,
@@ -124,8 +110,9 @@ class _VinylDiscArtwork extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  // Placeholder gradien + ikon not musik seperti preview v2.
                   const Icon(
-                    Icons.album_rounded,
+                    Icons.music_note_rounded,
                     color: Colors.white,
                     size: 40,
                   ),

@@ -6,10 +6,10 @@ import '../models/track_model.dart';
 import '../providers/app_providers.dart';
 import '../theme/omnix_theme.dart';
 import 'widgets/liquid_glass_box.dart';
+import 'widgets/like_plus_button.dart';
 import 'widgets/queue_sheet.dart';
 import 'widgets/sleep_timer_sheet.dart';
 import 'widgets/track_artwork.dart';
-import 'widgets/video_canvas_stage.dart';
 
 class FullscreenPlayerView extends ConsumerStatefulWidget {
   const FullscreenPlayerView({super.key});
@@ -104,10 +104,8 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
                           size: 32,
                         ),
                       ),
-                      _SongVideoCanvasPill(
-                        mode: playerState.mode,
-                        onModeSelected: controller.setPlaybackMode,
-                      ),
+                      // Pilihan mode Song/Video/Canvas dihapus bersama
+                      // canvas video (preview v2: artwork statis saja).
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -208,8 +206,8 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
                                   ),
                                   title: Text(
                                     isDownloaded
-                                        ? 'Hapus Unduhan Offline FLAC'
-                                        : 'Unduh Offline (FLAC 24-bit)',
+                                        ? 'Hapus Unduhan Offline'
+                                        : 'Unduh Offline',
                                   ),
                                 ),
                               ),
@@ -366,35 +364,26 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
           duration: const Duration(milliseconds: 280),
           switchInCurve: Curves.easeOutCubic,
           switchOutCurve: Curves.easeInCubic,
-          child: playerState.mode == PlaybackMode.song
-              ? Container(
-                  key: ValueKey('song_art_${track.videoId}'),
-                  decoration: BoxDecoration(
-                    borderRadius:
-                        BorderRadius.circular(OmniXTokens.radiusMiniPlayer),
-                    boxShadow: [
-                      BoxShadow(
-                        color: scheme.primary.withValues(alpha: 0.36),
-                        blurRadius: 36,
-                        offset: const Offset(0, 14),
-                      ),
-                    ],
-                  ),
-                  child: TrackArtwork(
-                    track: track,
-                    size: 296,
-                    borderRadius: OmniXTokens.radiusMiniPlayer,
-                  ),
-                )
-              : VideoCanvasStage(
-                  key: ValueKey(
-                    'stage_${playerState.mode.name}_${track.videoId}',
-                  ),
-                  track: track,
-                  detail: detail,
-                  playerState: playerState,
-                  controller: controller,
+          // Artwork statis (preview v2): thumbnail lagu, kotak radius 4px.
+          // Canvas video dihapus — tidak ada lagi stream video di pemutar.
+          child: Container(
+            key: ValueKey('song_art_${track.videoId}'),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(OmniXTokens.radiusThumb),
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.primary.withValues(alpha: 0.36),
+                  blurRadius: 36,
+                  offset: const Offset(0, 14),
                 ),
+              ],
+            ),
+            child: TrackArtwork(
+              track: track,
+              size: 296,
+              borderRadius: OmniXTokens.radiusThumb,
+            ),
+          ),
         ),
         const SizedBox(height: 20),
         Container(
@@ -414,12 +403,24 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          track.title,
-          style: theme.textTheme.headlineMedium,
-          textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                track.title,
+                style: theme.textTheme.headlineMedium,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // Badge eksplisit "E" di samping judul (preview v2).
+            if (track.isExplicit) ...[
+              const SizedBox(width: 6),
+              const ExplicitBadge(),
+            ],
+          ],
         ),
         const SizedBox(height: 4),
         Text(
@@ -673,16 +674,13 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
               icon: const Icon(Icons.queue_music_rounded, size: 18),
               label: Text('Antrean (${playerState.queue.length})'),
             ),
-            OutlinedButton.icon(
-              onPressed: () {
+            // Suka pakai "+" (preview v2), bukan hati.
+            LikePlusButton(
+              isLiked: isLiked,
+              onToggle: () {
                 ref.read(libraryProvider.notifier).toggleLike(track);
               },
-              icon: Icon(
-                isLiked ? Icons.favorite : Icons.favorite_border,
-                size: 18,
-                color: isLiked ? scheme.primary : scheme.onSurface,
-              ),
-              label: Text(isLiked ? 'Disukai' : 'Suka'),
+              tooltip: isLiked ? 'Hapus dari lagu disukai' : 'Suka',
             ),
             OutlinedButton.icon(
               onPressed: () {
@@ -1059,118 +1057,6 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
           ),
         );
       },
-    );
-  }
-}
-
-class _SongVideoCanvasPill extends StatelessWidget {
-  final PlaybackMode mode;
-  final ValueChanged<PlaybackMode> onModeSelected;
-
-  const _SongVideoCanvasPill({
-    required this.mode,
-    required this.onModeSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return LiquidGlassBox(
-      tier: GlassTier.glass3,
-      borderRadius: OmniXTokens.radiusPill,
-      padding: const EdgeInsets.all(4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ModeOptionButton(
-            label: 'Song',
-            icon: Icons.music_note_rounded,
-            selected: mode == PlaybackMode.song,
-            scheme: scheme,
-            onTap: () => onModeSelected(PlaybackMode.song),
-          ),
-          const SizedBox(width: 4),
-          _ModeOptionButton(
-            label: 'Video',
-            icon: Icons.videocam_rounded,
-            selected: mode == PlaybackMode.video,
-            scheme: scheme,
-            onTap: () => onModeSelected(PlaybackMode.video),
-          ),
-          const SizedBox(width: 4),
-          _ModeOptionButton(
-            label: 'Canvas',
-            icon: Icons.motion_photos_on_rounded,
-            selected: mode == PlaybackMode.canvas,
-            scheme: scheme,
-            onTap: () => onModeSelected(PlaybackMode.canvas),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ModeOptionButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final ColorScheme scheme;
-  final VoidCallback onTap;
-
-  const _ModeOptionButton({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.scheme,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: 'Mode $label',
-      child: InkWell(
-        mouseCursor: SystemMouseCursors.click,
-        borderRadius: BorderRadius.circular(OmniXTokens.radiusPill),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          constraints: const BoxConstraints(
-            minHeight: 38,
-            minWidth: 78,
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: selected ? scheme.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(OmniXTokens.radiusPill),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 15,
-                color: selected ? scheme.onPrimary : scheme.onSurface,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? scheme.onPrimary : scheme.onSurface,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

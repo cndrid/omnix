@@ -4,9 +4,7 @@ import '../models/track_model.dart';
 import '../providers/app_providers.dart';
 import '../theme/omnix_theme.dart';
 import 'widgets/liquid_glass_box.dart';
-import 'widgets/queue_sheet.dart';
 import 'widgets/track_artwork.dart';
-import 'widgets/track_tile.dart';
 
 class ExploreView extends ConsumerWidget {
   final double bottomSafePadding;
@@ -44,7 +42,6 @@ class ExploreView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final exploreAsync = ref.watch(exploreDataProvider);
     final activeCategory = ref.watch(homeCategoryFilterProvider);
-    final playerState = ref.watch(playerControllerProvider);
     final libraryState = ref.watch(libraryProvider);
     final engineState = ref.watch(audioEngineProvider);
     final theme = Theme.of(context);
@@ -127,9 +124,6 @@ class ExploreView extends ConsumerWidget {
         final allTracks = [
           for (final sec in exploreData.sections) ...sec.items,
         ];
-        final quickRecents = libraryState.recentTracks.isNotEmpty
-            ? libraryState.recentTracks.take(6).toList()
-            : allTracks.take(6).toList();
 
         final filteredSections = exploreData.sections.where((sec) {
           if (activeCategory == 'Semua') return true;
@@ -141,7 +135,30 @@ class ExploreView extends ConsumerWidget {
             ? filteredSections
             : exploreData.sections;
 
-        final heroTrack = allTracks.isNotEmpty ? allTracks.first : null;
+        // Rak 1 "Rekomendasi Lagu": 6 lagu pertama dari seksi yang tampil.
+        final recommendedTracks = displaySections
+            .expand((sec) => sec.items)
+            .take(6)
+            .toList();
+
+        // Rak 2 "Artis": 6 artis teratas dari feed.
+        final topArtists = exploreData.topArtists.take(6).toList();
+
+        // Rak 3 "Album": album unik dari semua lagu (lagu pertama tiap
+        // album jadi sumber artwork & artis), maks 6 album.
+        final albumEntries = <({AlbumModel album, TrackModel track})>[];
+        final seenAlbumNames = <String>{};
+        for (final tr in allTracks) {
+          final album = tr.album;
+          if (album == null || album.name.trim().isEmpty) continue;
+          if (seenAlbumNames.add(album.name)) {
+            albumEntries.add((album: album, track: tr));
+          }
+          if (albumEntries.length >= 6) break;
+        }
+
+        // Rak 4 "Playlist": 6 playlist pertama milik pengguna.
+        final userPlaylists = libraryState.playlists.take(6).toList();
 
         return ListView(
           padding: EdgeInsets.fromLTRB(
@@ -184,145 +201,130 @@ class ExploreView extends ConsumerWidget {
               scheme,
             ),
             const SizedBox(height: 24),
-            if (quickRecents.isNotEmpty) ...[
-              Text(
-                'Baru diputar',
-                style: theme.textTheme.titleLarge,
+            if (recommendedTracks.isNotEmpty) ...[
+              _RailHeader(
+                title: 'Rekomendasi Lagu',
+                onSeeAll: () {
+                  ref.read(playerControllerProvider.notifier).selectTrack(
+                        recommendedTracks.first,
+                        customQueue: recommendedTracks,
+                      );
+                },
               ),
               const SizedBox(height: 12),
-              _QuickRecentsGrid(
-                tracks: quickRecents,
-                activeVideoId: playerState.currentTrack?.videoId,
-                onTapTrack: (tr) {
-                  ref
-                      .read(playerControllerProvider.notifier)
-                      .selectTrack(tr, customQueue: quickRecents);
-                },
-                onAddToQueue: (tr) {
-                  ref.read(playerControllerProvider.notifier).addToQueue(tr);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Ditambahkan ke antrean: ${tr.title}'),
-                      action: SnackBarAction(
-                        label: 'Lihat Antrean',
-                        onPressed: () => showQueueManagerSheet(context, ref),
-                      ),
+              _HorizontalRail(
+                itemCount: recommendedTracks.length,
+                itemBuilder: (context, index) {
+                  final tr = recommendedTracks[index];
+                  return _RailCard(
+                    artwork: TrackArtwork(
+                      track: tr,
+                      size: 152,
+                      borderRadius: OmniXTokens.radiusThumb,
                     ),
+                    title: tr.title,
+                    subtitle: tr.artistLine,
+                    onTap: () {
+                      ref.read(playerControllerProvider.notifier).selectTrack(
+                            tr,
+                            customQueue: recommendedTracks,
+                          );
+                    },
                   );
                 },
               ),
               const SizedBox(height: 24),
             ],
-            if (heroTrack != null) ...[
-              _HeroShowcaseCard(
-                track: heroTrack,
-                isActive:
-                    playerState.currentTrack?.videoId == heroTrack.videoId,
-                isPlaying: playerState.isPlaying,
-                onPlay: () {
-                  ref.read(playerControllerProvider.notifier).selectTrack(
-                        heroTrack,
-                        customQueue: allTracks,
-                        openFullscreen: true,
-                      );
+            if (topArtists.isNotEmpty) ...[
+              _RailHeader(
+                title: 'Artis',
+                onSeeAll: () {
+                  ref.read(activeTabProvider.notifier).state = AppTab.cari;
                 },
-                onAddQueue: () {
-                  ref
-                      .read(playerControllerProvider.notifier)
-                      .addToQueue(heroTrack);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content:
-                          Text('Ditambahkan ke antrean: ${heroTrack.title}'),
-                      action: SnackBarAction(
-                        label: 'Lihat Antrean',
-                        onPressed: () => showQueueManagerSheet(context, ref),
-                      ),
-                    ),
+              ),
+              const SizedBox(height: 12),
+              _HorizontalRail(
+                itemCount: topArtists.length,
+                itemBuilder: (context, index) {
+                  final artist = topArtists[index];
+                  return _RailCard(
+                    circularArtwork: true,
+                    artwork: _ArtistCircleArtwork(name: artist.name),
+                    title: artist.name,
+                    subtitle: 'Artis',
+                    onTap: () {
+                      ref.read(searchQueryProvider.notifier).state =
+                          artist.name;
+                      ref.read(activeTabProvider.notifier).state = AppTab.cari;
+                    },
                   );
                 },
               ),
               const SizedBox(height: 24),
             ],
-            if (exploreData.topArtists.isNotEmpty) ...[
-              Text(
-                'Artis Favorit & Teratas',
-                style: theme.textTheme.titleLarge,
+            if (albumEntries.isNotEmpty) ...[
+              _RailHeader(
+                title: 'Album',
+                onSeeAll: () {
+                  ref.read(activeTabProvider.notifier).state = AppTab.cari;
+                },
               ),
               const SizedBox(height: 12),
-              SizedBox(
-                height: 104,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: exploreData.topArtists.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 16),
-                  itemBuilder: (context, idx) {
-                    final artist = exploreData.topArtists[idx];
-                    return _ArtistAvatarButton(
-                      artist: artist,
-                      onTap: () {
-                        ref.read(searchQueryProvider.notifier).state =
-                            artist.name;
-                        ref.read(activeTabProvider.notifier).state = AppTab.cari;
-                      },
-                    );
-                  },
-                ),
+              _HorizontalRail(
+                itemCount: albumEntries.length,
+                itemBuilder: (context, index) {
+                  final entry = albumEntries[index];
+                  return _RailCard(
+                    artwork: TrackArtwork(
+                      track: entry.track,
+                      size: 152,
+                      borderRadius: OmniXTokens.radiusThumb,
+                    ),
+                    title: entry.album.name,
+                    subtitle: entry.track.artistLine,
+                    onTap: () {
+                      ref.read(searchQueryProvider.notifier).state =
+                          entry.album.name;
+                      ref.read(activeTabProvider.notifier).state = AppTab.cari;
+                    },
+                  );
+                },
               ),
               const SizedBox(height: 24),
             ],
-            for (final section in displaySections) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(section.title, style: theme.textTheme.titleLarge),
-                        if (section.subtitle != null)
-                          Text(
-                            section.subtitle!,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                      ],
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: section.items.isEmpty
-                        ? null
-                        : () {
-                            ref
-                                .read(playerControllerProvider.notifier)
-                                .selectTrack(
-                                  section.items.first,
-                                  customQueue: section.items,
-                                );
-                          },
-                    icon: const Icon(Icons.playlist_play, size: 20),
-                    label: const Text('Putar Semua'),
-                  ),
-                ],
+            if (userPlaylists.isNotEmpty) ...[
+              _RailHeader(
+                title: 'Playlist',
+                onSeeAll: () {
+                  ref.read(activeTabProvider.notifier).state = AppTab.koleksi;
+                },
               ),
               const SizedBox(height: 12),
-              _ResponsiveTrackSection(
-                tracks: section.items,
-                activeVideoId: playerState.currentTrack?.videoId,
-                isPlaying: playerState.isPlaying,
-                libraryState: libraryState,
-                onPlayTrack: (track) {
-                  ref.read(playerControllerProvider.notifier).selectTrack(
-                        track,
-                        customQueue: section.items,
-                      );
-                },
-                onToggleLike: (track) {
-                  ref.read(libraryProvider.notifier).toggleLike(track);
-                },
-                onToggleDownload: (track) {
-                  ref
-                      .read(libraryProvider.notifier)
-                      .toggleOfflineDownload(track);
+              _HorizontalRail(
+                itemCount: userPlaylists.length,
+                itemBuilder: (context, index) {
+                  final pl = userPlaylists[index];
+                  final firstTrack =
+                      pl.tracks.isNotEmpty ? pl.tracks.first : null;
+                  return _RailCard(
+                    artwork: firstTrack != null
+                        ? TrackArtwork(
+                            track: firstTrack,
+                            size: 152,
+                            borderRadius: OmniXTokens.radiusThumb,
+                          )
+                        : _PlaylistPlaceholderArtwork(),
+                    title: pl.name,
+                    subtitle: '${pl.tracks.length} lagu',
+                    onTap: () {
+                      if (pl.tracks.isNotEmpty) {
+                        ref.read(playerControllerProvider.notifier).selectTrack(
+                              pl.tracks.first,
+                              customQueue: pl.tracks,
+                            );
+                      }
+                    },
+                  );
                 },
               ),
               const SizedBox(height: 24),
@@ -346,11 +348,6 @@ class ExploreView extends ConsumerWidget {
         Text(
           _contextualGreeting(engineState.userDisplayName),
           style: theme.textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Musik dari YouTube, langsung dari HP kamu.',
-          style: theme.textTheme.bodyMedium,
         ),
       ],
     );
@@ -401,7 +398,7 @@ class ExploreView extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Ketik suasana hati, aktivitas, atau genre. Sistem akan menyusun playlist dari hasil pencarian YouTube:',
+                'Ketik suasana hati, aktivitas, atau genre. Sistem akan menyusun playlist dari hasil pencarian:',
               ),
               const SizedBox(height: 12),
               TextField(
@@ -492,239 +489,114 @@ class _GlassCategoryChip extends StatelessWidget {
   }
 }
 
-class _QuickRecentsGrid extends StatelessWidget {
-  final List<TrackModel> tracks;
-  final String? activeVideoId;
-  final ValueChanged<TrackModel> onTapTrack;
-  final ValueChanged<TrackModel> onAddToQueue;
+/// Judul rak + tombol "Lihat semua" seperti preview UI v2.
+class _RailHeader extends StatelessWidget {
+  final String title;
+  final VoidCallback onSeeAll;
 
-  const _QuickRecentsGrid({
-    required this.tracks,
-    required this.activeVideoId,
-    required this.onTapTrack,
-    required this.onAddToQueue,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final theme = Theme.of(context);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final cols = constraints.maxWidth >= 860 ? 3 : 2;
-        final spacing = 10.0;
-        final itemWidth =
-            (constraints.maxWidth - (spacing * (cols - 1))) / cols;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: [
-            for (final tr in tracks)
-              SizedBox(
-                width: itemWidth,
-                child: InkWell(
-                  mouseCursor: SystemMouseCursors.click,
-                  borderRadius: BorderRadius.circular(OmniXTokens.radiusThumb),
-                  onTap: () => onTapTrack(tr),
-                  child: Container(
-                    height: 60,
-                    decoration: BoxDecoration(
-                      color: activeVideoId == tr.videoId
-                          ? scheme.surfaceContainerHighest
-                          : scheme.surface,
-                      borderRadius:
-                          BorderRadius.circular(OmniXTokens.radiusThumb),
-                      border: Border.all(
-                        color: activeVideoId == tr.videoId
-                            ? scheme.primary
-                            : scheme.outline,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        TrackArtwork(
-                          track: tr,
-                          size: 60,
-                          borderRadius: OmniXTokens.radiusThumb,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            tr.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelLarge,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Tambahkan ${tr.title} ke antrean',
-                          onPressed: () => onAddToQueue(tr),
-                          icon: Icon(
-                            Icons.playlist_add_rounded,
-                            color: scheme.onSurface,
-                            size: 20,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _HeroShowcaseCard extends StatelessWidget {
-  final TrackModel track;
-  final bool isActive;
-  final bool isPlaying;
-  final VoidCallback onPlay;
-  final VoidCallback onAddQueue;
-
-  const _HeroShowcaseCard({
-    required this.track,
-    required this.isActive,
-    required this.isPlaying,
-    required this.onPlay,
-    required this.onAddQueue,
+  const _RailHeader({
+    required this.title,
+    required this.onSeeAll,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final isCompact =
-        MediaQuery.sizeOf(context).width < OmniXTokens.breakpointTablet;
-
-    return LiquidGlassBox(
-      tier: GlassTier.glass2,
-      borderRadius: OmniXTokens.radiusCard,
-      padding: EdgeInsets.all(isCompact ? 18 : 24),
-      elevatedShadow: true,
-      child: isCompact
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TrackArtwork(
-                  track: track,
-                  size: 156,
-                  borderRadius: OmniXTokens.radiusCard,
-                ),
-                const SizedBox(height: 16),
-                _buildDetails(theme, scheme),
-              ],
-            )
-          : Row(
-              children: [
-                TrackArtwork(
-                  track: track,
-                  size: 152,
-                  borderRadius: OmniXTokens.radiusCard,
-                ),
-                const SizedBox(width: 24),
-                Expanded(child: _buildDetails(theme, scheme)),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildDetails(ThemeData theme, ColorScheme scheme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          track.title,
-          style: theme.textTheme.headlineMedium,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          track.artistLine,
-          style: theme.textTheme.bodyLarge?.copyWith(
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            FilledButton.icon(
-              onPressed: onPlay,
-              icon: Icon(
-                isActive && isPlaying
-                    ? Icons.equalizer
-                    : Icons.play_arrow_rounded,
-              ),
-              label: Text(
-                isActive && isPlaying ? 'Buka Pemutar' : 'Putar',
-              ),
-            ),
-            OutlinedButton.icon(
-              onPressed: onAddQueue,
-              icon: const Icon(Icons.playlist_add_rounded, size: 20),
-              label: const Text('+ Antrean'),
-            ),
-          ],
+        Text(title, style: theme.textTheme.titleLarge),
+        TextButton(
+          onPressed: onSeeAll,
+          child: const Text('Lihat semua'),
         ),
       ],
     );
   }
 }
 
-class _ArtistAvatarButton extends StatelessWidget {
-  final ArtistModel artist;
-  final VoidCallback onTap;
+/// Deret horizontal yang bisa di-scroll ke samping (preview UI v2).
+/// Tinggi 216px: artwork 152 + jarak 8 + judul 1 baris + subjudul 2 baris.
+class _HorizontalRail extends StatelessWidget {
+  final int itemCount;
+  final Widget Function(BuildContext, int) itemBuilder;
 
-  const _ArtistAvatarButton({
-    required this.artist,
-    required this.onTap,
+  const _HorizontalRail({
+    required this.itemCount,
+    required this.itemBuilder,
   });
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final initial =
-        artist.name.trim().isNotEmpty ? artist.name.trim()[0].toUpperCase() : 'A';
+    return SizedBox(
+      height: 216,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: itemCount,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: itemBuilder,
+      ),
+    );
+  }
+}
 
-    return InkWell(
-      mouseCursor: SystemMouseCursors.click,
-      borderRadius: BorderRadius.circular(OmniXTokens.radiusCard),
-      onTap: onTap,
-      child: SizedBox(
-        width: 84,
+/// Kartu rak 152px ala preview v2: artwork di atas, judul tebal 1 baris,
+/// subjudul redup maks 2 baris. Kartu artis memakai artwork bundar.
+class _RailCard extends StatelessWidget {
+  final Widget artwork;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool circularArtwork;
+
+  const _RailCard({
+    required this.artwork,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.circularArtwork = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      width: 152,
+      child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
+        borderRadius: BorderRadius.circular(OmniXTokens.radiusThumb),
+        onTap: onTap,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CircleAvatar(
-              radius: 32,
-              backgroundColor: scheme.surfaceContainerHighest,
-              child: Text(
-                initial,
-                style: TextStyle(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 22,
+            SizedBox(
+              width: 152,
+              height: 152,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(
+                  circularArtwork
+                      ? OmniXTokens.radiusPill
+                      : OmniXTokens.radiusThumb,
                 ),
+                child: artwork,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              artist.name,
+              title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12.5),
             ),
           ],
         ),
@@ -733,83 +605,71 @@ class _ArtistAvatarButton extends StatelessWidget {
   }
 }
 
-class _ResponsiveTrackSection extends StatelessWidget {
-  final List<TrackModel> tracks;
-  final String? activeVideoId;
-  final bool isPlaying;
-  final LibraryState libraryState;
-  final ValueChanged<TrackModel> onPlayTrack;
-  final ValueChanged<TrackModel> onToggleLike;
-  final ValueChanged<TrackModel> onToggleDownload;
+/// Artwork bundar artis: gradien + inisial nama seperti preview v2.
+class _ArtistCircleArtwork extends StatelessWidget {
+  final String name;
 
-  const _ResponsiveTrackSection({
-    required this.tracks,
-    required this.activeVideoId,
-    required this.isPlaying,
-    required this.libraryState,
-    required this.onPlayTrack,
-    required this.onToggleLike,
-    required this.onToggleDownload,
-  });
+  const _ArtistCircleArtwork({required this.name});
+
+  static const List<List<Color>> _palettes = [
+    [Color(0xFF4338CA), Color(0xFF7C5CFF)],
+    [Color(0xFF0EA5E9), Color(0xFF22C55E)],
+    [Color(0xFFF59E0B), Color(0xFFEF4444)],
+    [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+    [Color(0xFF22C55E), Color(0xFF0EA5E9)],
+    [Color(0xFF4338CA), Color(0xFFEC4899)],
+  ];
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final int columns;
-        if (constraints.maxWidth >= 980) {
-          columns = 3;
-        } else if (constraints.maxWidth >= 620) {
-          columns = 2;
-        } else {
-          columns = 1;
-        }
+    final trimmed = name.trim();
+    final initial =
+        trimmed.isNotEmpty ? trimmed[0].toUpperCase() : 'A';
+    final hash = trimmed.codeUnits.fold<int>(0, (a, b) => a + b);
+    final palette = _palettes[hash % _palettes.length];
+    return Container(
+      width: 152,
+      height: 152,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: palette,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+          fontSize: 52,
+        ),
+      ),
+    );
+  }
+}
 
-        if (columns == 1) {
-          return Column(
-            children: [
-              for (int i = 0; i < tracks.length; i++) ...[
-                TrackTile(
-                  track: tracks[i],
-                  isActive: activeVideoId == tracks[i].videoId,
-                  isPlaying: isPlaying && activeVideoId == tracks[i].videoId,
-                  isLiked: libraryState.isLiked(tracks[i].videoId),
-                  isDownloaded: libraryState.isDownloaded(tracks[i].videoId),
-                  onPlay: () => onPlayTrack(tracks[i]),
-                  onToggleLike: () => onToggleLike(tracks[i]),
-                  onToggleDownload: () => onToggleDownload(tracks[i]),
-                ),
-                if (i < tracks.length - 1) const SizedBox(height: 10),
-              ],
-            ],
-          );
-        }
-
-        final spacing = 12.0;
-        final itemWidth =
-            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: [
-            for (final track in tracks)
-              SizedBox(
-                width: itemWidth,
-                child: TrackTile(
-                  track: track,
-                  isActive: activeVideoId == track.videoId,
-                  isPlaying: isPlaying && activeVideoId == track.videoId,
-                  isLiked: libraryState.isLiked(track.videoId),
-                  isDownloaded: libraryState.isDownloaded(track.videoId),
-                  onPlay: () => onPlayTrack(track),
-                  onToggleLike: () => onToggleLike(track),
-                  onToggleDownload: () => onToggleDownload(track),
-                ),
-              ),
-          ],
-        );
-      },
+/// Placeholder playlist kosong: gradien + ikon not musik (preview v2).
+class _PlaylistPlaceholderArtwork extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 152,
+      height: 152,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF4338CA), Color(0xFF7C5CFF)],
+        ),
+      ),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.music_note_rounded,
+        color: Colors.white,
+        size: 40,
+      ),
     );
   }
 }
