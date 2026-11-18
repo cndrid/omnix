@@ -17,6 +17,10 @@ import 'shared_stream_client.dart';
 class YtClientService {
   static const Duration _timeout = Duration(seconds: 30);
 
+  // Jeda antar percobaan pencarian: hasil platform berubah-ubah antar
+  // request, jadi jeda singkat memberi peluang shelf yang berbeda.
+  static const Duration _retryDelay = Duration(seconds: 2);
+
   String _formatDuration(int seconds) {
     final m = seconds ~/ 60;
     final s = seconds % 60;
@@ -48,16 +52,54 @@ class YtClientService {
   /// Cari lagu/video langsung dari HP.
   /// Catatan: parser youtube_explode_dart 3.1.0 crash (NoSuchMethodError
   /// getT) untuk sebagian query — platform mengembalikan item khusus
-  /// (shelf/kartu) yang tidak bisa di-parse. Kalau halaman pertama
-  /// kosong, coba halaman berikutnya sekali.
+  /// (shelf/kartu) yang tidak bisa di-parse. Crash-nya tidak
+  /// deterministis: query yang sama kadang lolos kadang crash, jadi coba
+  /// sampai 3 kali dengan reformulasi query + fallback umum di ujungnya.
   Future<List<TrackModel>> searchMusic(
     String query, {
     int limit = 20,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
+
+    // Urutan percobaan: query asli, query diubah, lalu fallback umum
+    // yang sudah terverifikasi lolos parser ("musik Indonesia terpopuler").
+    // Reformulasi yang terverifikasi: tambah " indonesia" kalau query
+    // belum mengandungnya, kalau sudah → tambah " terbaru".
+    final attempts = <String>[
+      trimmed,
+      trimmed.toLowerCase().contains('indonesia')
+          ? '$trimmed terbaru'
+          : '$trimmed indonesia',
+      'musik Indonesia terpopuler',
+    ];
+
+    Object? lastError;
+    StackTrace? lastStack;
+    for (var i = 0; i < attempts.length; i++) {
+      if (i > 0) await Future.delayed(_retryDelay);
+      try {
+        final tracks = await _searchOnce(attempts[i], limit);
+        if (tracks.isNotEmpty) return tracks;
+      } catch (e, s) {
+        lastError = e;
+        lastStack = s;
+      }
+    }
+    // Semua percobaan gagal/kosong: lempar error seperti sebelumnya,
+    // supaya UI tetap menampilkan kartu error + tombol coba lagi.
+    if (lastError != null) {
+      Error.throwWithStackTrace(lastError, lastStack!);
+    }
+    throw StateError('Pencarian tidak menemukan hasil.');
+  }
+
+  /// Satu percobaan pencarian: halaman pertama, lalu halaman berikutnya
+  /// sekali kalau halaman pertama kosong. Error parser diteruskan apa
+  /// adanya ke pemanggil (searchMusic) untuk di-retry.
+  Future<List<TrackModel>> _searchOnce(String query, int limit) async {
     final yt = SharedStreamClient.instance;
-    var page = await yt.search.search(trimmed).timeout(_timeout);
+    var page = await yt.search.search(query).timeout(_timeout);
     var videos = page.toList();
     if (videos.isEmpty) {
       final next = await page.nextPage().timeout(_timeout);
