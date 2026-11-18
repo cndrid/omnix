@@ -24,10 +24,12 @@ class OmniXTokens {
   static const Color lightTextSecondary = Color(0xFF48485A);
   static const Color lightAccent = Color(0xFF4338CA);
 
-  static const double radiusThumb = 12.0;
+  // Radius artwork 4px sesuai preview UI v2 (dulu 12px).
+  static const double radiusThumb = 4.0;
   static const double radiusInput = 16.0;
   static const double radiusCard = 20.0;
-  static const double radiusMiniPlayer = 24.0;
+  // Mini player & sheet bawah 16px sesuai preview UI v2 (dulu 24px).
+  static const double radiusMiniPlayer = 16.0;
   static const double radiusNavbar = 32.0;
   static const double radiusPill = 999.0;
 
