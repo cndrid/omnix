@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/like_flow.dart';
 import '../../theme/omnix_theme.dart';
 import 'liquid_glass_box.dart';
 import 'like_plus_button.dart';
@@ -177,17 +178,14 @@ class _StickyMiniPlayerState extends ConsumerState<StickyMiniPlayer> {
                             ),
                           ],
                         ),
-                        // Suka pakai "+" (preview v2), bukan hati.
-                        LikePlusButton(
+                        LikeHeartButton(
                           isLiked: isLiked,
-                          onToggle: () {
-                            ref
-                                .read(libraryProvider.notifier)
-                                .toggleLike(track);
-                          },
-                          tooltip: isLiked
-                              ? 'Hapus dari lagu disukai'
-                              : 'Tambahkan ke lagu disukai',
+                          trackTitle: track.title,
+                          onToggle: () => LikeFlow.toggleLikeWithResult(
+                            ref,
+                            track,
+                            context: context,
+                          ),
                         ),
                         IconButton(
                           tooltip: playerState.isPlaying ? 'Jeda lagu' : 'Putar lagu',
