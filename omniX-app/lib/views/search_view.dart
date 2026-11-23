@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/track_model.dart';
 import '../providers/app_providers.dart';
+import '../providers/like_flow.dart';
 import '../theme/omnix_theme.dart';
 import 'widgets/liquid_glass_box.dart';
 import 'widgets/track_tile.dart';
@@ -302,11 +303,11 @@ class _SearchViewState extends ConsumerState<SearchView> {
                             },
                             onToggleLike: isPseudo
                                 ? null
-                                : () {
-                                    ref
-                                        .read(libraryProvider.notifier)
-                                        .toggleLike(track);
-                                  },
+                                : () => LikeFlow.toggleLikeWithResult(
+                                      ref,
+                                      track,
+                                      context: context,
+                                    ),
                             onToggleDownload: isPseudo
                                 ? null
                                 : () {
@@ -405,9 +406,11 @@ class _SearchViewState extends ConsumerState<SearchView> {
                             .read(playerControllerProvider.notifier)
                             .selectTrack(track, customQueue: tracks);
                       },
-                      onToggleLike: () {
-                        ref.read(libraryProvider.notifier).toggleLike(track);
-                      },
+                      onToggleLike: () => LikeFlow.toggleLikeWithResult(
+                        ref,
+                        track,
+                        context: context,
+                      ),
                       onToggleDownload: () {
                         ref
                             .read(libraryProvider.notifier)
@@ -493,9 +496,11 @@ class _SearchViewState extends ConsumerState<SearchView> {
                     .read(playerControllerProvider.notifier)
                     .selectTrack(ranked[i], customQueue: ranked);
               },
-              onToggleLike: () {
-                ref.read(libraryProvider.notifier).toggleLike(ranked[i]);
-              },
+              onToggleLike: () => LikeFlow.toggleLikeWithResult(
+                ref,
+                ranked[i],
+                context: context,
+              ),
               onToggleDownload: () {
                 ref
                     .read(libraryProvider.notifier)

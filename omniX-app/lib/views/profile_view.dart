@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/app_providers.dart';
+import '../providers/auth_provider.dart';
 import '../theme/omnix_theme.dart';
+import 'auth_view.dart';
 import 'widgets/liquid_glass_box.dart';
 
 class ProfileView extends ConsumerWidget {
@@ -39,6 +41,18 @@ class ProfileView extends ConsumerWidget {
     final isMobile =
         MediaQuery.sizeOf(context).width < OmniXTokens.breakpointTablet;
 
+    // Status akun (M0). Baca defensif: kalau lapisan auth belum bisa
+    // dibuat (Supabase belum di-init), tampil sebagai tamu.
+    bool isLoggedIn = false;
+    String? accountEmail;
+    try {
+      isLoggedIn = ref.watch(isLoggedInProvider);
+      accountEmail = ref.watch(authStateProvider).valueOrNull?.email;
+    } catch (_) {
+      isLoggedIn = false;
+      accountEmail = null;
+    }
+
     return ListView(
       padding: EdgeInsets.fromLTRB(
         isMobile ? 16 : 28,
@@ -48,6 +62,15 @@ class ProfileView extends ConsumerWidget {
       ),
       children: [
         Text('Profil & Pengaturan Audio', style: theme.textTheme.headlineMedium),
+        const SizedBox(height: 16),
+        _buildAccountSection(
+          context,
+          ref,
+          theme,
+          scheme,
+          isLoggedIn,
+          accountEmail,
+        ),
         const SizedBox(height: 16),
         LiquidGlassBox(
           tier: GlassTier.glass2,
@@ -354,6 +377,81 @@ class ProfileView extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// Baris status akun (M0) — paling atas tab Profil.
+  /// Tamu: tombol "Masuk / Daftar" (buka AuthView). Login: tampilkan
+  /// email + tombol "Keluar" (signOut, kembali ke mode tamu).
+  Widget _buildAccountSection(
+    BuildContext context,
+    WidgetRef ref,
+    ThemeData theme,
+    ColorScheme scheme,
+    bool isLoggedIn,
+    String? accountEmail,
+  ) {
+    return LiquidGlassBox(
+      tier: GlassTier.glass2,
+      borderRadius: OmniXTokens.radiusCard,
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: isLoggedIn
+                ? scheme.primary
+                : scheme.surfaceContainerHighest,
+            child: Icon(
+              isLoggedIn
+                  ? Icons.person_rounded
+                  : Icons.person_outline_rounded,
+              size: 26,
+              color: isLoggedIn
+                  ? scheme.onPrimary
+                  : scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isLoggedIn ? 'Masuk sebagai' : 'Mode tamu',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isLoggedIn
+                      ? (accountEmail ?? 'Akun OmniX')
+                      : 'Cari dan putar lagu tanpa akun. Masuk untuk menyimpan lagu, playlist, dan riwayat.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          if (isLoggedIn)
+            OutlinedButton(
+              onPressed: () {
+                ref.read(authControllerProvider.notifier).signOut();
+              },
+              child: const Text('Keluar'),
+            )
+          else
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const AuthView(),
+                  ),
+                );
+              },
+              child: const Text('Masuk / Daftar'),
+            ),
+        ],
+      ),
     );
   }
 

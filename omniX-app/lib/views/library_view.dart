@@ -1,12 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/track_model.dart';
 import '../providers/app_providers.dart';
+import '../providers/auth_provider.dart';
+import '../providers/data_providers.dart';
+import '../providers/like_flow.dart';
 import '../theme/omnix_theme.dart';
 import 'widgets/liquid_glass_box.dart';
 import 'widgets/track_tile.dart';
 
-class LibraryView extends ConsumerWidget {
+/// S12 Koleksi + S13 Liked Songs (M0).
+///
+/// Daftar Liked Songs dibaca dari [likedTracksProvider] (login: Supabase +
+/// cache Drift; tamu: Drift) dengan fallback ke state in-memory library.
+/// Saat Library dibuka pertama kali — dan setiap kali pengguna baru saja
+/// login — daftar disinkronkan sekali dari repository lewat
+/// [LibraryController.syncLikedTracksFromRepository].
+class LibraryView extends ConsumerStatefulWidget {
   final double bottomSafePadding;
 
   const LibraryView({
@@ -14,32 +26,62 @@ class LibraryView extends ConsumerWidget {
     required this.bottomSafePadding,
   });
 
-  static const List<String> _chips = [
-    'Semua',
-    'Playlist',
-    'Disukai',
-    'Unduhan Offline',
-  ];
+  @override
+  ConsumerState<LibraryView> createState() => _LibraryViewState();
+}
+
+class _LibraryViewState extends ConsumerState<LibraryView> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncLiked();
+    });
+  }
+
+  void _syncLiked() {
+    unawaited(
+      ref.read(libraryProvider.notifier).syncLikedTracksFromRepository(),
+    );
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final libraryState = ref.watch(libraryProvider);
     final libraryCtrl = ref.read(libraryProvider.notifier);
     final playerState = ref.watch(playerControllerProvider);
+
+    // Sinkron ulang saat pengguna baru saja login (tamu -> login).
+    try {
+      ref.listen<bool>(isLoggedInProvider, (prev, next) {
+        if (next && prev != true) _syncLiked();
+      });
+    } catch (_) {
+      // Lapisan auth belum siap — sinkron dilewati, state in-memory
+      // tetap dipakai.
+    }
+
+    // S13: Liked Songs dari repository; fallback state in-memory bila
+    // provider data belum ada nilainya / gagal dimuat.
+    final likedAsync = ref.watch(likedTracksProvider);
+    final likedTracks = likedAsync.valueOrNull ?? libraryState.likedTracks;
 
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isMobile =
         MediaQuery.sizeOf(context).width < OmniXTokens.breakpointTablet;
 
-    final displayedTracks = _resolveDisplayedTracks(libraryState);
+    final displayedTracks =
+        _resolveDisplayedTracks(libraryState, likedTracks);
+    final isLikedEmpty =
+        libraryState.activeCategoryChip == 'Disukai' && likedTracks.isEmpty;
 
     return ListView(
       padding: EdgeInsets.fromLTRB(
         isMobile ? 16 : 28,
         isMobile ? 16 : 24,
         isMobile ? 16 : 28,
-        bottomSafePadding,
+        widget.bottomSafePadding,
       ),
       children: [
         Wrap(
@@ -80,6 +122,7 @@ class LibraryView extends ConsumerWidget {
           theme,
           scheme,
           libraryState,
+          likedTracks,
         ),
         const SizedBox(height: 24),
         if (libraryState.activeCategoryChip == 'Semua' ||
@@ -147,19 +190,25 @@ class LibraryView extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  Icons.library_music_outlined,
-                  size: 44,
+                  isLikedEmpty
+                      ? Icons.favorite_border_rounded
+                      : Icons.library_music_outlined,
+                  size: 64,
                   color: scheme.onSurfaceVariant,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Belum ada lagu pada kategori "${libraryState.activeCategoryChip}".',
+                  isLikedEmpty
+                      ? 'Belum ada lagu disukai.'
+                      : 'Belum ada lagu pada kategori "${libraryState.activeCategoryChip}".',
                   style: theme.textTheme.titleMedium,
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Ketuk ikon + atau ikon unduh pada lagu di Beranda dan Cari untuk menyimpannya di Koleksi.',
+                  isLikedEmpty
+                      ? 'Cari lagu untuk disukai — ketuk ikon hati pada lagu.'
+                      : 'Ketuk ikon hati atau ikon unduh pada lagu di Beranda dan Cari untuk menyimpannya di Koleksi.',
                   style: theme.textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -169,7 +218,7 @@ class LibraryView extends ConsumerWidget {
                     ref.read(activeTabProvider.notifier).state = AppTab.cari;
                   },
                   icon: const Icon(Icons.search),
-                  label: const Text('Jelajahi Lagu Sekarang'),
+                  label: const Text('Cari Lagu'),
                 ),
               ],
             ),
@@ -189,7 +238,11 @@ class LibraryView extends ConsumerWidget {
                       customQueue: displayedTracks,
                     );
               },
-              onToggleLike: () => libraryCtrl.toggleLike(tr),
+              onToggleLike: () => LikeFlow.toggleLikeWithResult(
+                ref,
+                tr,
+                context: context,
+              ),
               onToggleDownload: () => libraryCtrl.toggleOfflineDownload(tr),
             ),
             const SizedBox(height: 10),
@@ -197,6 +250,13 @@ class LibraryView extends ConsumerWidget {
       ],
     );
   }
+
+  static const List<String> _chips = [
+    'Semua',
+    'Playlist',
+    'Disukai',
+    'Unduhan Offline',
+  ];
 
   List<UserPlaylistModel> _sortedPlaylists(LibraryState state) {
     final copy = List<UserPlaylistModel>.from(state.playlists);
@@ -212,16 +272,19 @@ class LibraryView extends ConsumerWidget {
     return copy;
   }
 
-  List<TrackModel> _resolveDisplayedTracks(LibraryState state) {
+  List<TrackModel> _resolveDisplayedTracks(
+    LibraryState state,
+    List<TrackModel> likedTracks,
+  ) {
     return switch (state.activeCategoryChip) {
-      'Disukai' => state.likedTracks,
+      'Disukai' => likedTracks,
       'Unduhan Offline' => state.offlineDownloadedTracks,
       _ => [
-          ...state.likedTracks,
+          ...likedTracks,
           for (final t in state.offlineDownloadedTracks)
-            if (!state.likedTracks.any((l) => l.videoId == t.videoId)) t,
+            if (!likedTracks.any((l) => l.videoId == t.videoId)) t,
           for (final t in state.recentTracks)
-            if (!state.likedTracks.any((l) => l.videoId == t.videoId) &&
+            if (!likedTracks.any((l) => l.videoId == t.videoId) &&
                 !state.offlineDownloadedTracks.any((d) => d.videoId == t.videoId))
               t,
         ],
@@ -230,7 +293,7 @@ class LibraryView extends ConsumerWidget {
 
   String _sectionHeading(String chip, int count) {
     return switch (chip) {
-      'Disukai' => 'Daftar Lagu Disukai ($count)',
+      'Disukai' => 'Lagu Disukai ($count)',
       'Unduhan Offline' => 'Tersimpan Offline ($count)',
       _ => 'Lagu Tersimpan & Terakhir Diputar ($count)',
     };
@@ -242,6 +305,7 @@ class LibraryView extends ConsumerWidget {
     ThemeData theme,
     ColorScheme scheme,
     LibraryState libraryState,
+    List<TrackModel> likedTracks,
   ) {
     final usedMb = libraryState.estimatedOfflineStorageMb;
     return LayoutBuilder(
@@ -264,8 +328,7 @@ class LibraryView extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(OmniXTokens.radiusThumb),
                 ),
                 child: Icon(
-                  // Lagu disukai ditandai "+" sesuai preview v2 (bukan hati).
-                  Icons.add_rounded,
+                  Icons.favorite_rounded,
                   color: scheme.onPrimary,
                   size: 30,
                 ),
@@ -295,7 +358,7 @@ class LibraryView extends ConsumerWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Lagu Disukai (${libraryState.likedTracks.length})',
+                      'Lagu Disukai (${likedTracks.length})',
                       style: theme.textTheme.titleLarge,
                     ),
                     Text(
@@ -306,13 +369,12 @@ class LibraryView extends ConsumerWidget {
                 ),
               ),
               IconButton(
-                tooltip: 'Putar cepat Lagu Disukai',
+                tooltip: 'Putar semua Lagu Disukai',
                 onPressed: () {
-                  final list = libraryState.likedTracks;
-                  if (list.isNotEmpty) {
+                  if (likedTracks.isNotEmpty) {
                     ref
                         .read(playerControllerProvider.notifier)
-                        .selectTrack(list.first, customQueue: list);
+                        .selectTrack(likedTracks.first, customQueue: likedTracks);
                   }
                 },
                 icon: Icon(
