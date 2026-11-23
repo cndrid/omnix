@@ -56,6 +56,11 @@ Future<void> main() async {
       androidNotificationChannelId: 'com.example.omnix_app',
       androidNotificationChannelName: 'OmniX',
       androidNotificationIcon: 'mipmap/ic_launcher',
+      // Percobaan 23 Nov 2026: notifikasi media tidak pernah muncul di
+      // Poco F7 walau semua izin ON — buat notifikasi persisten supaya
+      // HyperOS menampilkannya di shade / pusat kontrol / lock screen.
+      androidNotificationOngoing: true,
+      androidStopForegroundOnPause: true,
     ),
   );
   // Izin notifikasi diminta sekali, saat lagu pertama kali mulai diputar
