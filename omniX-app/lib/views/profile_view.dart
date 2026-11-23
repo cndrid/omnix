@@ -1,3 +1,4 @@
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/app_providers.dart';
@@ -376,8 +377,104 @@ class ProfileView extends ConsumerWidget {
             ],
           ),
         ),
+        const SizedBox(height: 24),
+        Text(
+          'Diagnostik Kontrol Media (sementara)',
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: 12),
+        _buildMediaDiagnostics(context, ref, theme, scheme),
       ],
     );
+  }
+
+  /// Kartu diagnosis kontrol media (sementara, 23 Nov 2026).
+  /// Menampilkan LANGSUNG apa yang dilihat lapisan audio_service di Dart:
+  /// apakah playbackState mengalir, apakah mediaItem terisi.
+  /// Kalau di sini tertulis "Memutar" + judul lagu, berarti sisi Dart benar
+  /// dan putusnya ada di jembatan Dart → service bawaan Android.
+  /// Kalau di sini kosong/stuck, berarti sisi Dart yang tidak mengalir.
+  /// Hapus kartu ini setelah penyebab ketemu.
+  Widget _buildMediaDiagnostics(
+    BuildContext context,
+    WidgetRef ref,
+    ThemeData theme,
+    ColorScheme scheme,
+  ) {
+    final handler = ref.watch(audioHandlerProvider);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(OmniXTokens.radiusCard),
+        border: Border.all(color: scheme.outline),
+      ),
+      child: StreamBuilder<PlaybackState>(
+        stream: handler.playbackState,
+        builder: (context, stateSnap) {
+          final state = stateSnap.data;
+          return StreamBuilder<MediaItem?>(
+            stream: handler.mediaItem,
+            builder: (context, itemSnap) {
+              final item = itemSnap.data;
+              final now = DateTime.now();
+              final clock =
+                  '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Kartu ini hanya untuk diagnosis, akan dihapus setelah masalah ketemu.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  _diagRow(theme, 'Status putar',
+                      state == null ? 'belum ada data' : (state.playing ? 'Memutar' : 'Jeda')),
+                  _diagRow(theme, 'Proses',
+                      state == null ? '-' : state.processingState.name),
+                  _diagRow(theme, 'Posisi',
+                      state == null ? '-' : _formatDuration(state.position)),
+                  _diagRow(theme, 'Lagu (mediaItem)',
+                      item == null
+                          ? 'BELUM ADA'
+                          : '${item.title} — ${item.artist ?? '-'}'),
+                  _diagRow(theme, 'Update terakhir', clock),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _diagRow(ThemeData theme, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 130,
+            child: Text(label, style: theme.textTheme.bodyMedium),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   /// Baris status akun (M0) — paling atas tab Profil.
