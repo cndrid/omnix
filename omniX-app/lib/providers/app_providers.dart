@@ -2,11 +2,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
+import '../data/liked_songs_repository.dart';
+import '../data/play_history_repository.dart';
 import '../models/track_model.dart';
 import '../services/api_service.dart';
 import '../services/audio_handler_service.dart';
 import '../services/skip_service.dart';
 import '../services/stream_extractor.dart';
+import 'data_providers.dart';
 
 enum AppTab { beranda, cari, koleksi, profil }
 
@@ -274,20 +277,79 @@ class LibraryState {
 }
 
 class LibraryController extends StateNotifier<LibraryState> {
-  LibraryController() : super(const LibraryState());
+  /// Repository M0 (Worker B). Null bila lapisan data belum bisa dibuat
+  /// (mis. Supabase belum di-init) — controller tetap jalan in-memory.
+  final LikedSongsRepository? _likedSongsRepository;
+  final PlayHistoryRepository? _playHistoryRepository;
 
-  void toggleLike(TrackModel track) {
-    final exists = state.isLiked(track.videoId);
-    if (exists) {
+  LibraryController({
+    LikedSongsRepository? likedSongsRepository,
+    PlayHistoryRepository? playHistoryRepository,
+  })  : _likedSongsRepository = likedSongsRepository,
+        _playHistoryRepository = playHistoryRepository,
+        super(const LibraryState());
+
+  void _applyLiked(TrackModel track, bool liked) {
+    if (liked) {
+      if (state.isLiked(track.videoId)) return;
+      state = state.copyWith(
+        likedTracks: [track, ...state.likedTracks],
+      );
+    } else {
       state = state.copyWith(
         likedTracks: state.likedTracks
             .where((t) => t.videoId != track.videoId)
             .toList(),
       );
+    }
+  }
+
+  /// Toggle like (API kompatibel, kini async + delegasi ke repository).
+  ///
+  /// Arah toggle ditentukan dari repository bila ada (sumber kebenaran
+  /// Drift/Supabase), kalau tidak dari state in-memory. State in-memory
+  /// diubah optimistic dulu, lalu repository dipanggil (tamu: Drift saja;
+  /// login: Supabase + Drift). Bila sinkron gagal
+  /// ([SupabaseSyncException]/[ProfileMissingException]/lainnya), state
+  /// in-memory dikembalikan dan `false` dikembalikan supaya pemanggil
+  /// (LikeFlow) bisa toast + hati kembali ke state semula.
+  Future<bool> toggleLike(TrackModel track) async {
+    final repo = _likedSongsRepository;
+    bool currentlyLiked;
+    if (repo != null) {
+      try {
+        currentlyLiked = await repo.isLiked(track.videoId);
+      } catch (_) {
+        currentlyLiked = state.isLiked(track.videoId);
+      }
     } else {
-      state = state.copyWith(
-        likedTracks: [track, ...state.likedTracks],
-      );
+      currentlyLiked = state.isLiked(track.videoId);
+    }
+    final targetLiked = !currentlyLiked;
+    _applyLiked(track, targetLiked);
+    if (repo != null) {
+      try {
+        await repo.toggleLike(track);
+      } catch (_) {
+        // Gagal simpan: kembalikan hati ke state semula.
+        _applyLiked(track, currentlyLiked);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Sinkronisasi awal dari repository (dipanggil sekali saat Library
+  /// dibuka / setelah login). Gagal dibiarkan diam — state in-memory
+  /// tetap dipakai.
+  Future<void> syncLikedTracksFromRepository() async {
+    final repo = _likedSongsRepository;
+    if (repo == null) return;
+    try {
+      final tracks = await repo.getLikedTracks();
+      state = state.copyWith(likedTracks: tracks);
+    } catch (_) {
+      // Abaikan: tampilan memakai state in-memory yang ada.
     }
   }
 
@@ -313,6 +375,12 @@ class LibraryController extends StateNotifier<LibraryState> {
     state = state.copyWith(
       recentTracks: [track, ...filtered].take(30).toList(),
     );
+    // Riwayat ke repository best-effort: kegagalan tidak boleh mengganggu
+    // pemutaran (repository sendiri sudah best-effort untuk Supabase).
+    final repo = _playHistoryRepository;
+    if (repo != null) {
+      unawaited(repo.recordPlay(track).catchError((_) {}));
+    }
   }
 
   void setCategoryChip(String chip) {
@@ -382,7 +450,25 @@ class LibraryController extends StateNotifier<LibraryState> {
 
 final libraryProvider =
     StateNotifierProvider<LibraryController, LibraryState>((ref) {
-  return LibraryController();
+  // Repository disuntik bila lapisan data bisa dibuat; kalau Supabase
+  // belum di-init (tugas koordinator di main.dart), controller tetap
+  // jalan in-memory saja dan tidak melempar di sini.
+  LikedSongsRepository? likedRepo;
+  PlayHistoryRepository? historyRepo;
+  try {
+    likedRepo = ref.read(likedSongsRepositoryProvider);
+  } catch (_) {
+    likedRepo = null;
+  }
+  try {
+    historyRepo = ref.read(playHistoryRepositoryProvider);
+  } catch (_) {
+    historyRepo = null;
+  }
+  return LibraryController(
+    likedSongsRepository: likedRepo,
+    playHistoryRepository: historyRepo,
+  );
 });
 
 class PlayerViewState {

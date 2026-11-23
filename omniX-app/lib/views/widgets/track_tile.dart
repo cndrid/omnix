@@ -15,7 +15,7 @@ class TrackTile extends ConsumerStatefulWidget {
   final bool isLiked;
   final bool isDownloaded;
   final VoidCallback onPlay;
-  final VoidCallback? onToggleLike;
+  final Future<bool> Function()? onToggleLike;
   final VoidCallback? onToggleDownload;
   /// Sembunyikan aksi baris (antrean/unduh/suka) untuk hasil semu seperti
   /// artis & playlist — mengetuknya membuka hasil, bukan memutar lagu.
@@ -43,16 +43,17 @@ class _TrackTileState extends ConsumerState<TrackTile> {
   bool _isFocused = false;
   bool _isHovered = false;
 
-  /// Toggle suka; saat lagu baru ditambahkan tampilkan toast seperti
-  /// preview v2 ("Added to Liked Songs").
-  void _handleLikeToggle() {
+  /// Toggle suka lewat LikeFlow (pemanggil). Kembalikan `true` bila
+  /// berhasil disimpan; toast sukses hanya bila lagu baru ditambahkan.
+  Future<bool> _handleLikeToggle() async {
     final wasLiked = widget.isLiked;
-    widget.onToggleLike?.call();
-    if (!wasLiked && mounted) {
+    final ok = await widget.onToggleLike?.call() ?? false;
+    if (ok && !wasLiked && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Added to Liked Songs')),
+        const SnackBar(content: Text('Ditambahkan ke Lagu Disukai')),
       );
     }
+    return ok;
   }
 
   @override
@@ -328,15 +329,12 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                       size: 20,
                     ),
                   ),
-                // Suka pakai "+" (preview v2), bukan hati.
-                LikePlusButton(
+                LikeHeartButton(
                   isLiked: widget.isLiked,
+                  trackTitle: widget.track.title,
                   onToggle: widget.onToggleLike == null
                       ? null
                       : _handleLikeToggle,
-                  tooltip: widget.isLiked
-                      ? 'Hapus ${widget.track.title} dari lagu disukai'
-                      : 'Simpan ${widget.track.title} ke lagu disukai',
                 ),
                 ],
               ],

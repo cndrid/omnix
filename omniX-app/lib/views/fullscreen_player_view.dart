@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/track_model.dart';
 import '../providers/app_providers.dart';
+import '../providers/like_flow.dart';
 import '../theme/omnix_theme.dart';
 import 'widgets/liquid_glass_box.dart';
 import 'widgets/like_plus_button.dart';
@@ -737,13 +738,15 @@ class _FullscreenPlayerViewState extends ConsumerState<FullscreenPlayerView> {
               icon: const Icon(Icons.queue_music_rounded, size: 18),
               label: Text('Antrean (${playerState.queue.length})'),
             ),
-            // Suka pakai "+" (preview v2), bukan hati.
-            LikePlusButton(
+            LikeHeartButton(
               isLiked: isLiked,
-              onToggle: () {
-                ref.read(libraryProvider.notifier).toggleLike(track);
-              },
-              tooltip: isLiked ? 'Hapus dari lagu disukai' : 'Suka',
+              trackTitle: track.title,
+              large: true,
+              onToggle: () => LikeFlow.toggleLikeWithResult(
+                ref,
+                track,
+                context: context,
+              ),
             ),
             OutlinedButton.icon(
               onPressed: () {
