@@ -12,7 +12,7 @@
 
     <application
         android:label="OmniX"
-        android:name="${applicationName}"
+        android:name=".OmniXApplication"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
         <activity
