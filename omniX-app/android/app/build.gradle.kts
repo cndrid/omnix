@@ -76,3 +76,13 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Media3 (pengganti audio_service untuk media session + notifikasi,
+    // 24 Nov 2026). media3-session: MediaSessionService + MediaSession
+    // yang memposting notifikasi media otomatis. media3-common:
+    // SimpleBasePlayer yang dipakai DartMirroringPlayer.
+    val media3Version = "1.11.1"
+    implementation("androidx.media3:media3-session:$media3Version")
+    implementation("androidx.media3:media3-common:$media3Version")
+}
