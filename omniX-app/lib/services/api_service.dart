@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../models/track_model.dart';
 import 'lyrics_service.dart';
 import 'skip_service.dart';
+import 'spotify_service.dart';
 import 'yt_client.dart';
 
 class ApiException implements Exception {
@@ -34,10 +35,11 @@ class OmniXApiService {
   OmniXApiService({
     String? baseUrl,
     YtClientService? ytClient,
+    SpotifyService? spotifyService,
     LrclibService? lyricsService,
     SkipService? skipService,
   })  : baseUrl = (baseUrl ?? '').replaceAll(RegExp(r'/+$'), ''),
-        _yt = ytClient ?? YtClientService(),
+        _yt = ytClient ?? YtClientService(spotifyService: spotifyService),
         _lyrics = lyricsService ?? LrclibService(),
         _skip = skipService ?? SkipService();
 
@@ -77,6 +79,20 @@ class OmniXApiService {
       }
     } catch (e) {
       throw ApiException('Gagal mencari "$trimmed": $e');
+    }
+  }
+
+  /// Resolusi LAZY Spotify -> YouTube (dipanggil saat lagu akan diputar,
+  /// lihat seam PlayerController.selectTrack di laporan). Mengembalikan
+  /// track yang sama dengan `videoId` terisi video YouTube yang cocok;
+  /// lagu asal YouTube dikembalikan apa adanya.
+  Future<TrackModel> resolveTrackForPlayback(TrackModel track) async {
+    try {
+      return await _yt.resolvePlaybackVideoId(track);
+    } catch (e) {
+      throw ApiException(
+        'Gagal menemukan video untuk "${track.title}": $e',
+      );
     }
   }
 

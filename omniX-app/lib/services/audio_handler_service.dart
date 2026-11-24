@@ -37,8 +37,10 @@ class PlayStartException implements Exception {
 /// - Fast start: [AudioLoadConfiguration] mulai putar tanpa menunggu
 ///   buffer penuh (bufferForPlayback 0) tapi tetap buffer jauh ke depan
 ///   (min 60 dtk / maks 200 dtk, ala SimpMusic).
-/// - Cache audio permanen di dokumen aplikasi (bukan direktori sementara
-///   yang bisa dibersihkan OS), tetap maks. 50 file terbaru.
+/// - Cache audio di direktori sementara aplikasi (24 Nov 2026: pindah dari
+///   dokumen aplikasi — cache lama di dokumen dihapus sekali saat migrasi),
+///   maks. 20 file terbaru DAN maks. ~200 MB total (file terlama dihapus
+///   dulu). Prune jalan saat handler mulai + setelah lagu selesai diputar.
 /// - Auto-recovery: kalau lagu macet di tengah jalan (buffering > ~10
 ///   detik atau error dari player), link baru di-extract ulang
 ///   (langsung -> Piped) dan pemutaran lanjut dari posisi terakhir,
@@ -90,23 +92,59 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
   /// menampilkan kartu error netral + tombol Coba Lagi.
   void Function(String message)? onRecoveryFailed;
 
+  /// Callback ke PlayerController.skipNext/skipPrevious (24 Nov 2026).
+  /// Didaftarkan di konstruktor PlayerController — handler TIDAK BOLEH
+  /// import app_providers.dart (arah importnya berlawanan: app_providers
+  /// import handler). Dipanggil [skipToNext]/[skipToPrevious] saat tombol
+  /// next/prev notifikasi / media session ditekan.
+  void Function()? onSkipNext;
+  void Function()? onSkipPrevious;
+
+  /// Indeks lagu aktif di antrean yang didorong controller lewat
+  /// [setQueueItems] — dipakai [PlaybackState.queueIndex]. Indeks dari
+  /// event just_audio selalu 0 (sumbernya satu lagu), jadi tidak dipakai.
+  int _queueIndex = 0;
+
+  // --- Pelepas idle hemat baterai (24 Nov 2026) ---
+  // Saat lagu dijeda, player + audio session tetap menahan audio focus
+  // dan ExoPlayer bisa terus mengunduh sampai batas buffer (200 dtk).
+  // Kalau jeda bertahan 10 menit, sumber dilepas (_player.stop() +
+  // setActive(false)); ketukan play berikutnya memuat ulang lagu yang
+  // sama dari posisi terakhir (lihat [play]).
+  static const _idleReleaseAfter = Duration(minutes: 10);
+  Timer? _idleReleaseTimer;
+  bool _idleReleased = false;
+  Duration _idlePosition = Duration.zero;
+
   AudioPlayer get player => _player;
 
   OmniXAudioHandler() {
     _initAudioSession();
+    // Migrasi cache (24 Nov 2026): hapus folder cache lama di dokumen
+    // aplikasi + prune cache baru. Fire-and-forget: tidak menghalangi
+    // konstruktor, dan tidak bentrok dengan loadAndPlay (folder beda).
+    unawaited(_migrateCacheLocation());
     // JANGAN pakai .pipe() di sini: pipe meneruskan error source ke
     // playbackState, dan loop `await for` audio_service (tanpa try/catch)
     // mati selamanya saat satu error masuk — media session tidak pernah
     // aktif (kartu media HyperOS hilang) walau lagu tetap bunyi. Error
     // sudah ditangani _playbackEventSub di bawah (auto-recovery).
     _player.playbackEventStream.listen(
-      (event) => playbackState.add(_transformEvent(event)),
+      (_) => playbackState.add(_transformEvent()),
       onError: (_) {},
     );
     _processingStateSub =
         _player.processingStateStream.listen(_onProcessingState);
     _playingSub = _player.playingStream.listen((playing) {
-      if (playing) _hasStartedPlaying = true;
+      if (playing) {
+        _hasStartedPlaying = true;
+        // Kembali bunyi: batalkan pelepas idle (kalau sempat dijadwalkan).
+        _cancelIdleReleaseTimer();
+      } else if (_currentTrack != null && !_idleReleased) {
+        // Dijeda dengan lagu termuat: jadwalkan pelepas idle. Tidak
+        // dijadwalkan kalau belum ada lagu (tidak ada yang dilepas).
+        _startIdleReleaseTimer();
+      }
     });
     // Error dari platform saat pemutaran berjalan (mis. stream putus di
     // tengah lagu) tidak dilempar ke pemanggil — just_audio melaporkannya
@@ -125,34 +163,154 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
   static const _chromeUa =
       'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-  /// Direktori cache audio permanen (maks. 50 file terbaru, dibersihkan
-  /// berkala). Sejak 18 Nov 2026 memakai dokumen aplikasi, bukan direktori
-  /// sementara — cache lama bisa dibersihkan OS sewaktu-waktu sehingga lagu
-  /// yang sudah terunduh hilang dan harus unduh ulang.
+  /// Batas cache audio (24 Nov 2026): maks. 20 file DAN maks. ~200 MB
+  /// total. File terlama dihapus dulu; file terbaru selalu dipertahankan
+  /// walau sendirian melewati batas byte (satu lagu tidak pernah sebesar
+  /// itu, tapi prune tidak boleh menghapus lagu yang sedang diputar).
+  static const maxCacheFiles = 20;
+  static const maxCacheBytes = 200 * 1024 * 1024;
+
+  /// Direktori cache audio (24 Nov 2026): direktori sementara aplikasi
+  /// (getTemporaryDirectory — boleh dibersihkan OS). Sebelumnya memakai
+  /// dokumen aplikasi yang PERMANEN (OS tidak membersihkan): 50 lagu
+  /// × ~5-10 MB bisa sampai ~500 MB dan tidak pernah hilang sendiri.
   Future<Directory> _cacheDir() async {
-    final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory('${docs.path}/audio_cache');
+    final tmp = await getTemporaryDirectory();
+    final dir = Directory('${tmp.path}/audio_cache');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
 
-  Future<void> _pruneCache(Directory dir) async {
+  /// Lokasi cache lama (dokumen aplikasi, dipakai sampai 23 Nov 2026).
+  /// Hanya dipakai migrasi sekali jalan + hitung/hapus cache: JANGAN
+  /// hapus folder lain di dokumen aplikasi.
+  Future<Directory> _legacyCacheDir() async {
+    final docs = await getApplicationDocumentsDirectory();
+    return Directory('${docs.path}/audio_cache');
+  }
+
+  /// Migrasi sekali jalan saat handler pertama dibuat: hapus folder cache
+  /// lama (documents/audio_cache) PERSIS — supaya ~500 MB lama tidak
+  /// tertinggal selamanya — lalu prune cache baru. Semua best-effort:
+  /// gagal migrasi tidak boleh menghalangi pemutaran.
+  Future<void> _migrateCacheLocation() async {
     try {
+      final legacy = await _legacyCacheDir();
+      if (await legacy.exists()) {
+        await legacy.delete(recursive: true);
+      }
+    } catch (_) {}
+    await _pruneCache();
+  }
+
+  /// Pilih file cache yang harus dihapus supaya sisa file memenuhi DUA
+  /// batas: maks. [maxCacheFiles] file terbaru DAN total maks.
+  /// [maxCacheBytes]. File terlama dihapus dulu. Murni (hanya baca
+  /// daftar file yang diberikan) supaya bisa diuji tanpa platform
+  /// channel — lihat test/cache_prune_test.dart.
+  static List<File> selectCacheFilesToDelete(List<File> files) {
+    int fileSize(File f) {
+      try {
+        return f.lengthSync();
+      } catch (_) {
+        return 0;
+      }
+    }
+
+    DateTime fileTime(File f) {
+      try {
+        return f.lastModifiedSync();
+      } catch (_) {
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
+    }
+
+    // Terbaru dulu.
+    final sorted = List<File>.from(files)
+      ..sort((a, b) => fileTime(b).compareTo(fileTime(a)));
+    final toDelete = <File>[];
+    var keptCount = 0;
+    var keptBytes = 0;
+    for (final f in sorted) {
+      final size = fileSize(f);
+      final fitsCount = keptCount < maxCacheFiles;
+      final fitsBytes = keptBytes + size <= maxCacheBytes;
+      if (keptCount == 0 || (fitsCount && fitsBytes)) {
+        keptCount++;
+        keptBytes += size;
+      } else {
+        toDelete.add(f);
+      }
+    }
+    return toDelete;
+  }
+
+  Future<void> _pruneCache() async {
+    try {
+      final dir = await _cacheDir();
       final files = await dir
           .list()
           .where((e) => e is File)
           .cast<File>()
           .toList();
-      if (files.length <= 50) return;
-      files.sort((a, b) => b
-          .lastModifiedSync()
-          .compareTo(a.lastModifiedSync()));
-      for (final f in files.skip(50)) {
+      for (final f in selectCacheFilesToDelete(files)) {
         try {
           await f.delete();
         } catch (_) {}
       }
     } catch (_) {}
+  }
+
+  /// File cache milik lagu yang sedang diputar (kalau ada) — tidak boleh
+  /// dihapus saat [clearAudioCache], LockCachingAudioSource masih
+  /// membacanya.
+  File? _currentCacheFile(Directory dir) {
+    final track = _currentTrack;
+    final url = _currentStreamUrl;
+    if (track == null || url == null) return null;
+    final key = _cacheKeyFor(track.videoId, url);
+    if (key == null) return null;
+    return File('${dir.path}/$key.cache');
+  }
+
+  /// Hapus semua file cache audio (lokasi baru + sisa lokasi lama kalau
+  /// masih ada), kecuali file lagu yang sedang diputar. Dipakai tombol
+  /// "Hapus cache" di Profil.
+  Future<void> clearAudioCache() async {
+    for (final getDir in [_cacheDir(), _legacyCacheDir()]) {
+      try {
+        final dir = await getDir;
+        if (!await dir.exists()) continue;
+        final keep = _currentCacheFile(dir);
+        await for (final e in dir.list()) {
+          if (e is File && e.path != keep?.path) {
+            try {
+              await e.delete();
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  /// Total ukuran cache audio saat ini (byte; lokasi baru + sisa lokasi
+  /// lama kalau masih ada). Dipakai tampilan ukuran di Profil.
+  Future<int> audioCacheSizeBytes() async {
+    var total = 0;
+    for (final getDir in [_cacheDir(), _legacyCacheDir()]) {
+      try {
+        final dir = await getDir;
+        if (!await dir.exists()) continue;
+        await for (final e in dir.list()) {
+          if (e is File) {
+            try {
+              total += await e.length();
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+    return total;
   }
 
   /// Kunci cache dari URL stream (videoId + itag, kalau ada).
@@ -185,6 +343,10 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
   void _onProcessingState(ProcessingState state) {
     _stallTimer?.cancel();
     _stallTimer = null;
+    // Lagu selesai diputar: prune cache (batas 20 file / 200 MB).
+    if (state == ProcessingState.completed) {
+      unawaited(_pruneCache());
+    }
     if (state == ProcessingState.buffering &&
         _hasStartedPlaying &&
         !_recovering &&
@@ -274,23 +436,17 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
     List<SkipSegment>? skipSegments,
     bool isRecoveryAttempt = false,
   }) async {
-    final item = MediaItem(
-      id: track.videoId,
-      title: track.title,
-      artist: track.artistLine,
-      album: track.album?.name,
-      duration: track.durationSeconds != null
-          ? Duration(seconds: track.durationSeconds!)
-          : null,
-      artUri: track.bestThumbnailUrl.isNotEmpty
-          ? Uri.tryParse(track.bestThumbnailUrl)
-          : null,
-    );
+    final item = mediaItemForTrack(track);
     mediaItem.add(item);
 
     _skipSegments = skipSegments ?? const [];
     await _positionSub?.cancel();
     _positionSub = null;
+    // Lagu (baru) dimuat: pelepas idle tidak berlaku lagi — lagu ini
+    // sedang dimuat/diputar, dan penanda idle-release lama direset supaya
+    // play() berikut tidak mengira player masih dilepas.
+    _idleReleased = false;
+    _cancelIdleReleaseTimer();
 
     // Lagu (baru) dimuat: reset penanda supaya deteksi macet hanya aktif
     // setelah lagu ini benar-benar mulai bunyi. Timer macet lama dibatalkan.
@@ -312,7 +468,7 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
     if (cacheKey != null) {
       try {
         final dir = await _cacheDir();
-        unawaited(_pruneCache(dir));
+        unawaited(_pruneCache());
         final file = File('${dir.path}/$cacheKey.cache');
         // ignore: experimental_member_use
         source = LockCachingAudioSource(
@@ -404,6 +560,38 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
     }
   }
 
+  /// MediaItem untuk satu lagu — dipakai [loadAndPlay] dan controller
+  /// saat mendorong antrean (lihat [setQueueItems]).
+  static MediaItem mediaItemForTrack(TrackModel track) {
+    return MediaItem(
+      id: track.videoId,
+      title: track.title,
+      artist: track.artistLine,
+      album: track.album?.name,
+      duration: track.durationSeconds != null
+          ? Duration(seconds: track.durationSeconds!)
+          : null,
+      artUri: track.bestThumbnailUrl.isNotEmpty
+          ? Uri.tryParse(track.bestThumbnailUrl)
+          : null,
+    );
+  }
+
+  /// Dorong antrean pemutar (milik PlayerController) ke media session
+  /// (24 Nov 2026). Dipanggil controller setiap kali antrean berubah.
+  /// Sebelumnya queue TIDAK PERNAH diisi, jadi skipToNext/skipToPrevious
+  /// bawaan audio_service (yang jalan di atas queue) tidak bisa bekerja
+  /// dan tombol next/prev notifikasi diam. [currentIndex] ikut disimpan
+  /// supaya [PlaybackState.queueIndex] benar (lihat [_transformEvent]).
+  Future<void> setQueueItems(
+    List<MediaItem> items, {
+    int currentIndex = 0,
+  }) async {
+    _queueIndex =
+        items.isEmpty ? 0 : currentIndex.clamp(0, items.length - 1);
+    await updateQueue(items);
+  }
+
   /// Segmen sponsor yang datang MENYUSUL setelah lagu mulai bunyi (jalur
   /// start tidak lagi menunggu SponsorBlock — lihat PlayerController).
   /// Pasang + aktifkan watcher-nya; kalau posisi sudah masuk segmen,
@@ -442,6 +630,24 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
 
   @override
   Future<void> play() async {
+    // Player dilepas setelah idle lama (lihat [_releaseIdleResources]):
+    // play() biasa tidak bisa membunyikan player yang sudah di-stop —
+    // muat ulang lagu yang sama dari posisi terakhir. Kalau muat ulang
+    // gagal (mis. URL kedaluwarsa), _idleReleased dikembalikan true
+    // supaya ketukan play berikut mencoba muat ulang lagi.
+    if (_idleReleased && _currentTrack != null && _currentStreamUrl != null) {
+      try {
+        await loadAndPlay(
+          track: _currentTrack!,
+          streamUrl: _currentStreamUrl!,
+          startPosition: _idlePosition,
+          skipSegments: _skipSegments,
+        );
+      } catch (_) {
+        _idleReleased = true;
+      }
+      return;
+    }
     // Batas waktu yang sama seperti di loadAndPlay supaya ketukan play dari
     // UI / notifikasi / media session juga tidak menggantung kalau audio
     // focus ditolak; kalau gagal, lagu tampil pause (tombol ▶) dan pengguna
@@ -451,6 +657,22 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
 
   @override
   Future<void> pause() => _player.pause();
+
+  /// Tombol next notifikasi / media session (24 Nov 2026): teruskan ke
+  /// PlayerController.skipNext lewat callback (lihat [onSkipNext]).
+  /// Sebelumnya tidak ada override — QueueHandler bawaan audio_service
+  /// bekerja di atas queue yang tidak pernah diisi, jadi tombol diam.
+  @override
+  Future<void> skipToNext() async {
+    onSkipNext?.call();
+  }
+
+  /// Tombol prev notifikasi / media session (24 Nov 2026): teruskan ke
+  /// PlayerController.skipPrevious lewat callback (lihat [onSkipPrevious]).
+  @override
+  Future<void> skipToPrevious() async {
+    onSkipPrevious?.call();
+  }
 
   @override
   Future<void> seek(Duration position) => _player.seek(position);
@@ -462,15 +684,56 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
   Future<void> stop() async {
     _stallTimer?.cancel();
     _stallTimer = null;
+    _cancelIdleReleaseTimer();
+    _idleReleased = false;
     _currentTrack = null;
     // Batalkan recovery / pemuatan yang mungkin sedang jalan.
     _loadGeneration++;
     await _positionSub?.cancel();
     await _player.stop();
+    // Lepas audio session (best-effort; di Android umumnya no-op dan
+    // just_audio mengaktifkannya lagi saat play berikutnya).
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
     return super.stop();
   }
 
-  PlaybackState _transformEvent(PlaybackEvent event) {
+  /// Jadwalkan pelepas idle: kalau lagu tetap dijeda selama
+  /// [_idleReleaseAfter], player + audio session dilepas.
+  void _startIdleReleaseTimer() {
+    _cancelIdleReleaseTimer();
+    _idleReleaseTimer = Timer(_idleReleaseAfter, () {
+      unawaited(_releaseIdleResources());
+    });
+  }
+
+  void _cancelIdleReleaseTimer() {
+    _idleReleaseTimer?.cancel();
+    _idleReleaseTimer = null;
+  }
+
+  /// Lepas player + audio session setelah jeda lama (hemat baterai):
+  /// stop() just_audio melepas audio focus dan menghentikan unduhan
+  /// buffer ExoPlayer; setActive(false) menonaktifkan audio session.
+  /// Posisi terakhir disimpan supaya [play] bisa lanjut dari sana.
+  /// Hanya jalan kalau benar-benar masih jeda — kalau pengguna sudah
+  /// menekan play lagi, timer sudah dibatalkan lewat playingStream.
+  Future<void> _releaseIdleResources() async {
+    if (_player.playing || _currentTrack == null || _idleReleased) return;
+    _idlePosition = _player.position;
+    _idleReleased = true;
+    try {
+      await _player.stop();
+    } catch (_) {}
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
+  }
+
+  PlaybackState _transformEvent() {
     return PlaybackState(
       controls: [
         MediaControl.skipToPrevious,
@@ -496,18 +759,23 @@ class OmniXAudioHandler extends BaseAudioHandler with SeekHandler, QueueHandler 
       updatePosition: _player.position,
       bufferedPosition: _player.bufferedPosition,
       speed: _player.speed,
-      queueIndex: event.currentIndex,
+      // Indeks dari antrean controller (lihat setQueueItems), bukan
+      // event.currentIndex just_audio yang selalu 0 (sumber satu lagu).
+      queueIndex: _queueIndex,
     );
   }
 
   Future<void> dispose() async {
     _stallTimer?.cancel();
+    _cancelIdleReleaseTimer();
     await _processingStateSub?.cancel();
     await _playingSub?.cancel();
     await _playbackEventSub?.cancel();
     await _positionSub?.cancel();
     onRecoveryStateChanged = null;
     onRecoveryFailed = null;
+    onSkipNext = null;
+    onSkipPrevious = null;
     await _player.dispose();
   }
 }
