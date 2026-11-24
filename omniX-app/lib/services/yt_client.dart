@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../models/track_model.dart';
 import 'shared_stream_client.dart';
+import 'spotify_service.dart';
 
 /// Layanan musik 100% client-side (InnerTube, lewat youtube_explode_dart).
 ///
@@ -10,11 +11,20 @@ import 'shared_stream_client.dart';
 /// tidak ada risiko server mati, IP server diblokir platform, atau
 /// SocketException ke backend sendiri.
 ///
-/// Fast start (18 Nov 2026): semua method memakai SATU instance
-/// [YoutubeExplode] bersama ([SharedStreamClient.instance]) — sebelumnya
-/// tiap method membuat instance baru lalu menutupnya, jadi tiap panggilan
-/// handshake/TLS ulang tanpa connection reuse.
+/// Pencarian lagu (24 Nov 2026): katalog Spotify dipakai DULUAN untuk
+/// metadata/cover — hasil cari Spotify jauh lebih bersih (satu lagu =
+/// satu track, bukan video mix/kompilasi puluhan lagu). Audio TETAP dari
+/// YouTube: resolusi ke video dilakukan LAZY saat lagu akan diputar
+/// ([resolvePlaybackVideoId]), bukan untuk semua hasil sekaligus.
+/// Kalau kunci Spotify kosong (build lokal tanpa --dart-define) atau
+/// katalog gagal, pencarian jatuh kembali ke YouTube seperti semula —
+/// aplikasi tidak crash dan tidak menampilkan error ke pengguna.
 class YtClientService {
+  final SpotifyService _spotify;
+
+  YtClientService({SpotifyService? spotifyService})
+      : _spotify = spotifyService ?? SpotifyService();
+
   static const Duration _timeout = Duration(seconds: 30);
 
   // Jeda antar percobaan pencarian: hasil platform berubah-ubah antar
@@ -49,13 +59,54 @@ class YtClientService {
     );
   }
 
+  /// Cari lagu: katalog Spotify dulu (metadata + cover resmi), lalu
+  /// fallback diam-diam ke YouTube kalau kunci kosong / katalog gagal /
+  /// hasil kosong. Hasil Spotify punya `videoId` kosong + `spotifyId`
+  /// terisi — video YouTube-nya baru dicari saat lagu akan diputar
+  /// ([resolvePlaybackVideoId]).
+  Future<List<TrackModel>> searchMusic(
+    String query, {
+    int limit = 20,
+  }) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return const [];
+    if (_spotify.isConfigured) {
+      try {
+        final found = await _spotify.searchTracks(trimmed, limit: 10);
+        if (found.isNotEmpty) {
+          return found.map(_spotifyTrackToTrack).toList();
+        }
+      } catch (_) {
+        // Katalog gagal: jatuh ke YouTube di bawah, tanpa error ke UI.
+      }
+    }
+    return _searchMusicYouTube(trimmed, limit: limit);
+  }
+
+  TrackModel _spotifyTrackToTrack(SpotifyTrack t) {
+    final secs = t.durationMs > 0 ? t.durationMs ~/ 1000 : null;
+    return TrackModel(
+      videoId: '',
+      title: t.title,
+      artists: t.artists.map((name) => ArtistModel(name: name)).toList(),
+      album: t.album.isEmpty ? null : AlbumModel(name: t.album),
+      duration: secs != null ? _formatDuration(secs) : null,
+      durationSeconds: secs,
+      thumbnails: t.coverUrl.isEmpty
+          ? const []
+          : [ThumbnailModel(url: t.coverUrl, width: 640, height: 640)],
+      isExplicit: t.isExplicit,
+      spotifyId: t.id,
+    );
+  }
+
   /// Cari lagu/video langsung dari HP.
   /// Catatan: parser youtube_explode_dart 3.1.0 crash (NoSuchMethodError
   /// getT) untuk sebagian query — platform mengembalikan item khusus
   /// (shelf/kartu) yang tidak bisa di-parse. Crash-nya tidak
   /// deterministis: query yang sama kadang lolos kadang crash, jadi coba
   /// sampai 3 kali dengan reformulasi query + fallback umum di ujungnya.
-  Future<List<TrackModel>> searchMusic(
+  Future<List<TrackModel>> _searchMusicYouTube(
     String query, {
     int limit = 20,
   }) async {
@@ -113,6 +164,106 @@ class YtClientService {
       if (tracks.length >= limit) break;
     }
     return tracks;
+  }
+
+  /// Durasi maksimum video yang boleh diputar sebagai lagu: video di
+  /// atas ini hampir pasti mix/kompilasi/full album, bukan satu lagu.
+  static const int maxPlayableSeconds = 15 * 60;
+
+  /// Pola judul video yang menandakan BUKAN satu lagu (mix/kompilasi/
+  /// full album/maraton jam-jaman). `\bmix\b` sengaja ber-word-boundary
+  /// supaya "Remix" (satu lagu yang sah) tetap lolos.
+  static final List<RegExp> _rejectedTitlePatterns = [
+    RegExp(r'\bmix\b', caseSensitive: false),
+    RegExp(r'\bkompilasi\b', caseSensitive: false),
+    RegExp(r'compilation', caseSensitive: false),
+    RegExp(r'full album', caseSensitive: false),
+    RegExp(r'\bnonstop\b', caseSensitive: false),
+    RegExp(r'non-stop', caseSensitive: false),
+    RegExp(r'\b\d+\s*(hour|hours|jam)\b', caseSensitive: false),
+    RegExp(r'\bplaylist\b', caseSensitive: false),
+  ];
+
+  /// Apakah sebuah video YouTube layak diputar sebagai lagu ini.
+  /// Dipakai sebagai pure function supaya bisa diuji tanpa network.
+  /// Selisih durasi dengan target TIDAK menolak — hanya dipakai untuk
+  /// perangkingan di [resolvePlaybackVideoId] (versi live/lyrics yang
+  /// durasinya agak beda tetap boleh diputar).
+  static bool matchesPlaybackCandidate({
+    required String title,
+    required int? durationSeconds,
+    int? targetDurationSeconds,
+  }) {
+    if (durationSeconds == null || durationSeconds <= 0) return false;
+    if (durationSeconds > maxPlayableSeconds) return false;
+    for (final pattern in _rejectedTitlePatterns) {
+      if (pattern.hasMatch(title)) return false;
+    }
+    return true;
+  }
+
+  /// Resolusi LAZY Spotify -> YouTube: dipanggil SAAT lagu akan diputar
+  /// (seam di PlayerController.selectTrack — lihat patch yang diusulkan),
+  /// BUKAN saat hasil cari ditampilkan. Hasil cari tampil dari metadata
+  /// Spotify (cover + durasi dari katalog); video YouTube hanya dicari
+  /// untuk lagu yang benar-benar diketuk.
+  ///
+  /// Cocokkan berdasarkan judul+artis + saringan durasi: buang video
+  /// >15 menit dan judul mix/kompilasi/full album/maraton; dari yang
+  /// lolos, pilih yang durasinya paling dekat dengan durasi katalog.
+  /// Lagu yang sudah punya `videoId` (asal YouTube) dikembalikan apa
+  /// adanya. Melempar [StateError] kalau tidak ada video yang cocok.
+  Future<TrackModel> resolvePlaybackVideoId(TrackModel track) async {
+    if (track.videoId.isNotEmpty) return track;
+    final spotifyId = track.spotifyId;
+    if (spotifyId == null || spotifyId.isEmpty) return track;
+    final artist = track.artistLine;
+    final queries = <String>[
+      if (artist.isNotEmpty && artist != 'Artis Tidak Diketahui')
+        '${track.title} $artist',
+      track.title,
+    ];
+    for (final query in queries) {
+      List<TrackModel> candidates;
+      try {
+        candidates = await _searchOnce(query, 10);
+      } catch (_) {
+        continue;
+      }
+      final passing = candidates
+          .where((t) => matchesPlaybackCandidate(
+                title: t.title,
+                durationSeconds: t.durationSeconds,
+                targetDurationSeconds: track.durationSeconds,
+              ))
+          .toList();
+      if (passing.isEmpty) continue;
+      final target = track.durationSeconds;
+      if (target != null) {
+        passing.sort((a, b) =>
+            (a.durationSeconds! - target).abs().compareTo(
+                  (b.durationSeconds! - target).abs(),
+                ));
+      }
+      final best = passing.first;
+      return TrackModel(
+        videoId: best.videoId,
+        title: track.title,
+        artists: track.artists,
+        album: track.album,
+        duration: track.duration,
+        durationSeconds: track.durationSeconds,
+        thumbnails: track.thumbnails,
+        isExplicit: track.isExplicit,
+        resultType: track.resultType,
+        category: track.category,
+        audioQualityBadge: track.audioQualityBadge,
+        spotifyId: track.spotifyId,
+      );
+    }
+    throw StateError(
+      'Tidak ditemukan video yang cocok untuk "${track.title}".',
+    );
   }
 
   /// Cari artis (channel) — dipakai filter "Artis" di layar Cari.

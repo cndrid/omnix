@@ -72,6 +72,9 @@ class LikedSongsRepository {
   /// Tamu: cek Drift. Login: cek Supabase dulu, fallback Drift bila
   /// offline/gagal (atau bila lagu belum ada di cache `tracks` Supabase).
   Future<bool> isLiked(String videoId) async {
+    // Guard (24 Nov 2026): videoId kosong bukan kunci like yang valid
+    // (semua lagu Spotify yang belum ter-resolve berbagi '').
+    if (videoId.isEmpty) return false;
     if (_loggedIn) {
       final userId = _currentUserId()!;
       try {
@@ -166,6 +169,9 @@ class LikedSongsRepository {
   /// toast dan mengembalikan hati ke state semula. Bila sudah suka:
   /// hapus dari Drift + delete `liked_songs` di Supabase (bila login).
   Future<void> toggleLike(TrackModel track) async {
+    // Guard (24 Nov 2026): jangan pernah menyimpan baris like dengan
+    // videoId kosong (lihat isLiked di atas).
+    if (track.videoId.isEmpty) return;
     final liked = await isLiked(track.videoId);
     if (!liked) {
       await _saveLocalLike(track);

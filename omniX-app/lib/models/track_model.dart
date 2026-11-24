@@ -138,6 +138,13 @@ class TrackModel {
   /// diketahui — view menyembunyikan badge kalau kosong.
   final String audioQualityBadge;
 
+  /// ID lagu di katalog Spotify (nullable). Terisi hanya untuk lagu yang
+  /// berasal dari pencarian katalog — `videoId` masih kosong sampai lagu
+  /// di-resolve ke video YouTube saat akan diputar (resolusi lazy, lihat
+  /// YtClientService.resolvePlaybackVideoId). Null untuk lagu YouTube
+  /// biasa; perilaku field lain tidak berubah.
+  final String? spotifyId;
+
   const TrackModel({
     required this.videoId,
     required this.title,
@@ -150,6 +157,7 @@ class TrackModel {
     this.resultType = 'song',
     this.category = 'music',
     this.audioQualityBadge = '',
+    this.spotifyId,
   });
 
   String get artistLine {
@@ -204,6 +212,7 @@ class TrackModel {
       resultType: (json['result_type'] as String?) ?? 'song',
       category: (json['category'] as String?) ?? 'music',
       audioQualityBadge: (json['audio_quality_badge'] as String?) ?? '',
+      spotifyId: json['spotify_id'] as String?,
     );
   }
 }

@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'providers/app_providers.dart';
 import 'providers/auth_provider.dart';
 import 'services/audio_handler_service.dart';
+import 'services/media3_bridge.dart';
 import 'services/supabase_service.dart';
 import 'theme/omnix_theme.dart';
 import 'design/design_showcase_view.dart';
@@ -46,23 +46,14 @@ Future<void> main() async {
   // baru tanpa override akan melempar StateError saat dibaca.
   final supabaseService = SupabaseService();
   await supabaseService.initialize();
-  // Daftarkan handler ke audio_service sebelum aplikasi jalan, supaya
-  // sistem Android membuat media session + notifikasi media: pusat
-  // kontrol, lock screen, dan pil status bar HyperOS bisa menampilkan
-  // dan mengontrol lagu yang sedang diputar.
-  final audioHandler = await AudioService.init(
-    builder: () => OmniXAudioHandler(),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.example.omnix_app',
-      androidNotificationChannelName: 'OmniX',
-      androidNotificationIcon: 'mipmap/ic_launcher',
-      // Percobaan 23 Nov 2026: notifikasi media tidak pernah muncul di
-      // Poco F7 walau semua izin ON — buat notifikasi persisten supaya
-      // HyperOS menampilkannya di shade / pusat kontrol / lock screen.
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
-    ),
-  );
+  // Media session + notifikasi media lewat Media3 (pengganti
+  // audio_service, 24 Nov 2026 — audio_service terbukti tidak pernah
+  // memposting notifikasi di Poco F7 walau semua izin ON). Audio tetap
+  // diputar just_audio lewat handler ini; Media3 hanya mencerminkan
+  // state handler ke notifikasi sistem dan meneruskan tombol media
+  // kembali ke handler. Service audio_service lama tidak lagi dibuat.
+  final audioHandler = OmniXAudioHandler();
+  await Media3Bridge.init(audioHandler);
   // Izin notifikasi diminta sekali, saat lagu pertama kali mulai diputar
   // (bukan saat aplikasi dibuka). onError dikosongkan sengaja: stream
   // ini bisa membawa error player, dan listener ini tidak boleh mati

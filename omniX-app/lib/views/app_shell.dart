@@ -11,6 +11,30 @@ import 'search_view.dart';
 import 'widgets/liquid_glass_box.dart';
 import 'widgets/sticky_mini_player.dart';
 
+/// Aksi yang harus dilakukan saat tombol back sistem ditekan.
+enum BackAction {
+  /// Pemutar fullscreen sedang terbuka: tutup pemutar, tetap di tab yang sama.
+  closePlayer,
+
+  /// Pemutar tertutup dan tab aktif bukan Beranda: pindah ke Beranda.
+  goHome,
+
+  /// Sudah di Beranda dan pemutar tertutup: biarkan sistem keluar aplikasi.
+  exitApp,
+}
+
+/// Keputusan back murni (tanpa efek samping) supaya bisa di-unit-test.
+///
+/// Urutan prioritas: pemutar fullscreen dulu, lalu tab Beranda.
+BackAction resolveBackAction({
+  required bool isPlayerOpen,
+  required bool isHomeTab,
+}) {
+  if (isPlayerOpen) return BackAction.closePlayer;
+  if (!isHomeTab) return BackAction.goHome;
+  return BackAction.exitApp;
+}
+
 class OmniXAppShell extends ConsumerWidget {
   const OmniXAppShell({super.key});
 
@@ -26,6 +50,14 @@ class OmniXAppShell extends ConsumerWidget {
     final isMobile = width < OmniXTokens.breakpointTablet;
     final isDesktop = width >= OmniXTokens.breakpointDesktop;
     final hasActiveTrack = playerState.currentTrack != null;
+
+    // Pemutar fullscreen benar-benar tampil hanya kalau flag terbuka DAN
+    // ada lagu aktif (kondisi yang sama dengan overlay di bawah).
+    final isPlayerOpen = playerState.isFullscreenOpen && hasActiveTrack;
+    final backAction = resolveBackAction(
+      isPlayerOpen: isPlayerOpen,
+      isHomeTab: activeTab == AppTab.beranda,
+    );
 
     // Geometri overlay bawah (mobile), dihitung dari bawah layar:
     // nav pill: jarak bawah 16 + tinggi 64 (target sentuh 48 + padding
@@ -65,8 +97,22 @@ class OmniXAppShell extends ConsumerWidget {
       },
       child: Focus(
         autofocus: true,
-        child: Stack(
-          children: [
+        child: PopScope(
+          // Hanya di Beranda (dan pemutar tertutup) back boleh keluar aplikasi.
+          canPop: backAction == BackAction.exitApp,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            switch (backAction) {
+              case BackAction.closePlayer:
+                controller.closeFullscreen();
+              case BackAction.goHome:
+                ref.read(activeTabProvider.notifier).state = AppTab.beranda;
+              case BackAction.exitApp:
+                break;
+            }
+          },
+          child: Stack(
+            children: [
             Scaffold(
               appBar: AppBar(
                 backgroundColor: scheme.surface,
@@ -285,7 +331,8 @@ class OmniXAppShell extends ConsumerWidget {
                 ),
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

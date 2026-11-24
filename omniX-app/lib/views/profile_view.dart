@@ -1,4 +1,3 @@
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/app_providers.dart';
@@ -379,102 +378,13 @@ class ProfileView extends ConsumerWidget {
         ),
         const SizedBox(height: 24),
         Text(
-          'Diagnostik Kontrol Media (sementara)',
+          'Penyimpanan',
           style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: 12),
-        _buildMediaDiagnostics(context, ref, theme, scheme),
+        const _AudioCacheCard(),
       ],
     );
-  }
-
-  /// Kartu diagnosis kontrol media (sementara, 23 Nov 2026).
-  /// Menampilkan LANGSUNG apa yang dilihat lapisan audio_service di Dart:
-  /// apakah playbackState mengalir, apakah mediaItem terisi.
-  /// Kalau di sini tertulis "Memutar" + judul lagu, berarti sisi Dart benar
-  /// dan putusnya ada di jembatan Dart → service bawaan Android.
-  /// Kalau di sini kosong/stuck, berarti sisi Dart yang tidak mengalir.
-  /// Hapus kartu ini setelah penyebab ketemu.
-  Widget _buildMediaDiagnostics(
-    BuildContext context,
-    WidgetRef ref,
-    ThemeData theme,
-    ColorScheme scheme,
-  ) {
-    final handler = ref.watch(audioHandlerProvider);
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(OmniXTokens.radiusCard),
-        border: Border.all(color: scheme.outline),
-      ),
-      child: StreamBuilder<PlaybackState>(
-        stream: handler.playbackState,
-        builder: (context, stateSnap) {
-          final state = stateSnap.data;
-          return StreamBuilder<MediaItem?>(
-            stream: handler.mediaItem,
-            builder: (context, itemSnap) {
-              final item = itemSnap.data;
-              final now = DateTime.now();
-              final clock =
-                  '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Kartu ini hanya untuk diagnosis, akan dihapus setelah masalah ketemu.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  _diagRow(theme, 'Status putar',
-                      state == null ? 'belum ada data' : (state.playing ? 'Memutar' : 'Jeda')),
-                  _diagRow(theme, 'Proses',
-                      state == null ? '-' : state.processingState.name),
-                  _diagRow(theme, 'Posisi',
-                      state == null ? '-' : _formatDuration(state.position)),
-                  _diagRow(theme, 'Lagu (mediaItem)',
-                      item == null
-                          ? 'BELUM ADA'
-                          : '${item.title} — ${item.artist ?? '-'}'),
-                  _diagRow(theme, 'Update terakhir', clock),
-                ],
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _diagRow(ThemeData theme, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 130,
-            child: Text(label, style: theme.textTheme.bodyMedium),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDuration(Duration d) {
-    final m = d.inMinutes;
-    final s = d.inSeconds % 60;
-    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   /// Baris status akun (M0) — paling atas tab Profil.
@@ -603,6 +513,129 @@ class ProfileView extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Kartu cache audio (24 Nov 2026): menampilkan ukuran cache audio saat
+/// ini + tombol "Hapus cache" dengan dialog konfirmasi.
+///
+/// Catatan cache artwork: aplikasi TIDAK memakai cache artwork di disk —
+/// artwork hanya dimuat lewat Image.network (cache memori Flutter saja,
+/// tanpa cached_network_image / flutter_cache_manager), jadi tidak ada
+/// cache artwork terpisah yang perlu dibersihkan. Yang dibersihkan di
+/// sini hanya cache audio (LockCachingAudioSource).
+class _AudioCacheCard extends ConsumerStatefulWidget {
+  const _AudioCacheCard();
+
+  @override
+  ConsumerState<_AudioCacheCard> createState() => _AudioCacheCardState();
+}
+
+class _AudioCacheCardState extends ConsumerState<_AudioCacheCard> {
+  Future<int>? _sizeFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _sizeFuture = ref.read(audioHandlerProvider).audioCacheSizeBytes();
+  }
+
+  void _refreshSize() {
+    setState(() {
+      _sizeFuture = ref.read(audioHandlerProvider).audioCacheSizeBytes();
+    });
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _confirmAndClear() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus cache audio?'),
+        content: const Text(
+          'Lagu yang sudah diunduh akan diunduh ulang saat diputar lagi. '
+          'Lagu yang sedang diputar tidak ikut dihapus.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await ref.read(audioHandlerProvider).clearAudioCache();
+    if (!mounted) return;
+    _refreshSize();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Cache audio dihapus.')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(OmniXTokens.radiusCard),
+        border: Border.all(color: scheme.outline),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.storage_rounded, color: scheme.primary, size: 28),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Cache Audio',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                FutureBuilder<int>(
+                  future: _sizeFuture,
+                  builder: (context, snap) {
+                    final text = switch (snap.connectionState) {
+                      ConnectionState.waiting => 'Menghitung…',
+                      _ when snap.hasError => 'Ukuran tidak diketahui',
+                      _ => 'Ukuran cache: ${_formatBytes(snap.data ?? 0)}',
+                    };
+                    return Text(text, style: theme.textTheme.bodyMedium);
+                  },
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Lagu yang sudah diputar tersimpan supaya bisa diputar ulang tanpa mengunduh lagi (maks. 20 lagu / 200 MB).',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton.icon(
+            onPressed: _confirmAndClear,
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Hapus cache'),
+          ),
+        ],
+      ),
     );
   }
 }

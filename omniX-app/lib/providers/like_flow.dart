@@ -50,6 +50,31 @@ class LikeFlow {
       return false;
     }
 
+    // Resolusi lazy Spotify -> YouTube (24 Nov 2026): lagu Spotify yang
+    // belum diputar punya videoId '' — like mengunci pada videoId (lihat
+    // LibraryController.toggleLike), jadi resolve dulu supaya like
+    // tersimpan di bawah videoId aslinya, bukan kunci '' yang dipakai
+    // bersama semua lagu yang belum ter-resolve.
+    if (track.videoId.isEmpty && track.spotifyId != null) {
+      try {
+        track = await ref.read(apiServiceProvider).resolveTrackForPlayback(
+              track,
+            );
+      } catch (_) {
+        if (context != null && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Tidak menemukan video untuk lagu ini, coba lagi'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return false;
+      }
+      if (track.videoId.isEmpty) return false;
+    }
+
     final ok = await ref.read(libraryProvider.notifier).toggleLike(track);
     // Segarkan daftar Liked Songs + status like lagu ini.
     try {
