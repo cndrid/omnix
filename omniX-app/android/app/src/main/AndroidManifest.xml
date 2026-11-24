@@ -33,18 +33,22 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- Service audio_service: media session + notifikasi media, supaya
-             pusat kontrol, lock screen, dan pil status bar HyperOS bisa
-             menampilkan dan mengontrol pemutaran. -->
-        <service android:name="com.ryanheise.audioservice.AudioService"
+        <!-- Service Media3: media session + notifikasi media (pengganti
+             audio_service, 24 Nov 2026). Notifikasi diposting otomatis
+             oleh MediaSessionService saat lagu diputar; foreground
+             dilepas saat jeda (lihat OmniXPlaybackService). -->
+        <service android:name=".OmniXPlaybackService"
             android:foregroundServiceType="mediaPlayback"
-            android:exported="true" tools:ignore="Instantiatable">
+            android:exported="true">
             <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
-        <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver"
-            android:exported="true" tools:ignore="Instantiatable">
+        <!-- Teruskan tombol media headset/Bluetooth ke service saat
+             aplikasi belum jalan. -->
+        <receiver android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
