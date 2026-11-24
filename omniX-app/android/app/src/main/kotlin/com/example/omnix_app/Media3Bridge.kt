@@ -129,13 +129,29 @@ object Media3Bridge {
     }
 
     /**
-     * Start service saat update pertama tiba. Dipanggil dari handler
-     * channel (main thread, aplikasi di foreground saat lagu pertama
-     * diputar) — bukan dari background, jadi tidak kena larangan start
-     * foreground service Android 12+.
+     * Start service HANYA kalau sudah ada lagu untuk ditampilkan
+     * ([pendingMediaItem] tidak null). Dipanggil dari handler channel
+     * (main thread, aplikasi di foreground saat lagu pertama diputar) —
+     * bukan dari background, jadi tidak kena larangan start foreground
+     * service Android 12+.
+     *
+     * Syarat "ada lagu" ini WAJIB: service yang di-start lewat
+     * startForegroundService() harus memanggil startForeground() dalam
+     * ~5 detik, dan Media3 hanya memposting notifikasi (dan dengan itu
+     * memanggil startForeground) kalau player punya media item. Start
+     * saat state masih idle tanpa lagu — seperti yang terjadi di awal
+     * aplikasi, saat Dart langsung mengirim state idle — berarti service
+     * jalan 5 detik tanpa notifikasi, lalu Android mematikan aplikasi:
+     * RemoteServiceException (kejadian di Robo test Firebase Test Lab,
+     * 24 Nov 2026, dan kemungkinan besar sama dengan crash waktu play
+     * di Poco F7 Pak). Update state/antrean tanpa lagu TIDAK boleh
+     * men-start service; begitu updateMediaItem pertama tiba, service
+     * start dan notifikasi langsung terposting dari state yang sudah
+     * tersimpan ([registerPlayer]).
      */
     private fun ensureServiceStarted() {
         if (player != null || serviceStartRequested) return
+        if (pendingMediaItem == null) return
         val context = appContext ?: return
         serviceStartRequested = true
         try {
