@@ -35,7 +35,7 @@ final apiServiceProvider = Provider<OmniXApiService>((ref) {
   return service;
 });
 
-// Instance handler berasal dari AudioService.init di main.dart dan
+// Instance handler dibuat di main.dart (Media3Bridge.init) dan
 // disuntikkan lewat ProviderScope override, supaya handler yang dipakai
 // UI sama dengan yang terdaftar di media session. Buat instance baru
 // di sini hanya kalau aplikasi dijalankan tanpa melewati main.dart.
@@ -244,6 +244,11 @@ class LibraryState {
   });
 
   bool isLiked(String videoId) {
+    // Guard (24 Nov 2026): videoId kosong bukan kunci like yang valid —
+    // semua lagu Spotify yang belum ter-resolve berbagi '', jadi tanpa
+    // ini satu baris '' membuat SEMUA lagu yang belum ter-resolve
+    // terlihat disukai.
+    if (videoId.isEmpty) return false;
     return likedTracks.any((t) => t.videoId == videoId);
   }
 
@@ -290,6 +295,9 @@ class LibraryController extends StateNotifier<LibraryState> {
         super(const LibraryState());
 
   void _applyLiked(TrackModel track, bool liked) {
+    // Guard (24 Nov 2026): jangan pernah menyimpan baris like dengan
+    // videoId kosong (lihat isLiked di atas).
+    if (track.videoId.isEmpty) return;
     if (liked) {
       if (state.isLiked(track.videoId)) return;
       state = state.copyWith(
@@ -314,6 +322,10 @@ class LibraryController extends StateNotifier<LibraryState> {
   /// in-memory dikembalikan dan `false` dikembalikan supaya pemanggil
   /// (LikeFlow) bisa toast + hati kembali ke state semula.
   Future<bool> toggleLike(TrackModel track) async {
+    // Guard (24 Nov 2026): videoId kosong bukan kunci like yang valid.
+    // Jalur normal sudah resolve dulu di LikeFlow; kalau sampai sini
+    // masih kosong, tolak supaya tidak ada baris '' yang tersimpan.
+    if (track.videoId.isEmpty) return false;
     final repo = _likedSongsRepository;
     bool currentlyLiked;
     if (repo != null) {
@@ -624,6 +636,20 @@ class PlayerController extends StateNotifier<PlayerViewState> {
         errorMessage: message,
       );
     };
+    // Tombol next/prev notifikasi / media session (24 Nov 2026): handler
+    // tidak boleh import file ini, jadi controller mendaftarkan callback
+    // ke handler (lihat onSkipNext/onSkipPrevious di handler).
+    _audioHandler.onSkipNext = () => unawaited(skipNext());
+    _audioHandler.onSkipPrevious = () => unawaited(skipPrevious());
+    // Dorong antrean ke handler.queue setiap kali antrean berubah, supaya
+    // media session / notifikasi melihat antrean yang benar (dan
+    // queueIndex-nya benar). Tanpa ini queue handler selalu kosong.
+    addListener((s) {
+      unawaited(_audioHandler.setQueueItems(
+        s.queue.map(OmniXAudioHandler.mediaItemForTrack).toList(),
+        currentIndex: s.currentIndex,
+      ));
+    });
   }
 
   String get backendBaseUrl => _api.baseUrl;
@@ -682,8 +708,30 @@ class PlayerController extends StateNotifier<PlayerViewState> {
     // selectTrack yang sedang jalan akan memutarnya (lihat
     // _selectingVideoId). Guard ini dicek SEBELUM generation naik, supaya
     // ketukan kedua tidak ikut mengacaukan selectTrack pertama.
-    if (_selectingVideoId == track.videoId) return;
-    _selectingVideoId = track.videoId;
+    // Kunci guard (24 Nov 2026): videoId kalau ada, kalau tidak spotifyId
+    // — lagu Spotify yang belum ter-resolve SEMUANYA punya videoId '',
+    // jadi guard videoId saja akan mengabaikan lagu kedua yang berbeda
+    // DAN, setelah resolve, flag '' tidak pernah ter-clear (finally di
+    // bawah memakai videoId hasil resolve, bukan '').
+    final selectKey = track.videoId.isNotEmpty
+        ? track.videoId
+        : (track.spotifyId ?? '');
+    if (_selectingVideoId == selectKey) return;
+    _selectingVideoId = selectKey;
+    // Resolusi lazy Spotify -> YouTube (24 Nov 2026): lagu dari katalog
+    // belum punya videoId — cari video YouTube yang cocok dulu.
+    if (track.videoId.isEmpty && track.spotifyId != null) {
+      try {
+        track = await _api.resolveTrackForPlayback(track);
+      } catch (e) {
+        state = state.copyWith(
+          isLoadingTrack: false,
+          errorMessage: e.toString(),
+        );
+        _clearSelecting(selectKey);
+        return;
+      }
+    }
     // Stopwatch diagnosis (bug start lambat): berapa lama dari ketuk
     // sampai bunyi / gagal — supaya video berikutnya bisa dipastikan
     // bagiannya, bukan ditebak. Lihat debugPrint di bawah.
@@ -840,8 +888,10 @@ class PlayerController extends StateNotifier<PlayerViewState> {
       );
     } finally {
       // Lepas guard ketukan ganda. No-op kalau lagu lain sudah dipilih
-      // (flag sudah milik selectTrack yang baru).
-      _clearSelecting(track.videoId);
+      // (flag sudah milik selectTrack yang baru). Pakai selectKey (bukan
+      // track.videoId hasil resolve) supaya flag ter-clear walau lagu
+      // masuk sebagai Spotify yang belum ter-resolve.
+      _clearSelecting(selectKey);
     }
   }
 
@@ -1183,6 +1233,8 @@ class PlayerController extends StateNotifier<PlayerViewState> {
     // (mis. recovery yang selesai belakangan).
     _audioHandler.onRecoveryStateChanged = null;
     _audioHandler.onRecoveryFailed = null;
+    _audioHandler.onSkipNext = null;
+    _audioHandler.onSkipPrevious = null;
     super.dispose();
   }
 }
